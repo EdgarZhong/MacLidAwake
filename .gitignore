@@ -1,0 +1,8 @@
+# Compiled binaries
+cli/keepawake/keepawake
+experiments/phantom-display/phantom-display
+
+# Swift build artifacts
+.build/
+*.o
+*.swiftmodule
