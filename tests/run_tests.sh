@@ -134,43 +134,186 @@ fi
 
 section "Pre-flight warnings"
 
-if pmset -g batt 2>/dev/null | head -1 | grep -q "Battery Power"; then
-  "$KEEPAWAKE" >/tmp/kw_battery_warn.log 2>&1 &
-  KWB=$!
+# These warnings only fire without --force, and only after the Intel-arch
+# guard — which itself requires --force to get past on Intel (see the
+# "refuses to run on Intel without --force" check above). So on Intel,
+# without --force, the process dies at the arch guard before ever reaching
+# this code; there's no way to observe these warnings there without also
+# suppressing them via --force, which would defeat the point. Skip on Intel
+# rather than failing on an unreachable code path.
+if [ "$ARCH" == "x86_64" ]; then
+  skip "battery-power warning check (unreachable on Intel without --force, which also suppresses it)"
+  skip "cursor-drift warning check (unreachable on Intel without --force, which also suppresses it)"
+  skip "Sidecar-specific addendum check (unreachable on Intel without --force, which also suppresses it)"
+else
+  if pmset -g batt 2>/dev/null | head -1 | grep -q "Battery Power"; then
+    "$KEEPAWAKE" >/tmp/kw_battery_warn.log 2>&1 &
+    KWB=$!
+    disown
+    sleep 1
+    if grep -q "battery power" /tmp/kw_battery_warn.log; then
+      pass "battery-power warning shown when running on battery"
+    else
+      fail "expected battery-power warning not found"
+    fi
+    kill -INT "$KWB" 2>/dev/null
+    wait_for_exit "$KWB"
+  else
+    skip "battery-power warning check (currently on AC power)"
+  fi
+
+  "$KEEPAWAKE" >/tmp/kw_cursor_warn.log 2>&1 &
+  KWC=$!
   disown
   sleep 1
-  if grep -q "battery power" /tmp/kw_battery_warn.log; then
-    pass "battery-power warning shown when running on battery"
+  if grep -qi "cursor can reach" /tmp/kw_cursor_warn.log; then
+    pass "cursor-drift warning shown unconditionally (origin-parking is known broken, so this always applies)"
   else
-    fail "expected battery-power warning not found"
+    fail "expected cursor-drift warning not found"
   fi
-  kill -INT "$KWB" 2>/dev/null
-  wait_for_exit "$KWB"
-else
-  skip "battery-power warning check (currently on AC power)"
+
+  if system_profiler SPDisplaysDataType 2>/dev/null | grep -qi "Sidecar"; then
+    if grep -qi "sidecar display is currently connected" /tmp/kw_cursor_warn.log; then
+      pass "additional Sidecar-specific warning shown when Sidecar is connected"
+    else
+      fail "expected Sidecar-specific addendum not found"
+    fi
+  else
+    skip "Sidecar-specific addendum check (no Sidecar currently connected)"
+  fi
+  kill -INT "$KWC" 2>/dev/null
+  wait_for_exit "$KWC"
 fi
 
-"$KEEPAWAKE" >/tmp/kw_cursor_warn.log 2>&1 &
-KWC=$!
+# The sections below (caffeinate integration, command wrapping, -w) don't
+# depend on a single-display baseline or on the phantom display actually
+# registering with WindowServer — on Intel, apply() reports success even
+# though nothing really registers (see RESEARCH.md), so these still exercise
+# real code paths there. Only the "Virtual display creation" and
+# clamshell-property assertions further down are genuinely
+# Apple-Silicon/clean-baseline-dependent.
+section "caffeinate integration"
+
+"$KEEPAWAKE" --force >/tmp/kw_caffeinate_default.log 2>&1 &
+KWCA=$!
 disown
 sleep 1
-if grep -qi "cursor can reach" /tmp/kw_cursor_warn.log; then
-  pass "cursor-drift warning shown unconditionally (origin-parking is known broken, so this always applies)"
+if pgrep -f "caffeinate -i -w $KWCA" >/dev/null; then
+  pass "default run spawns internal caffeinate with -i (matches caffeinate's own default)"
 else
-  fail "expected cursor-drift warning not found"
+  fail "expected an internal 'caffeinate -i -w $KWCA' process, none found"
+fi
+kill -INT "$KWCA" 2>/dev/null
+wait_for_exit "$KWCA"
+sleep 1
+if pgrep -f "caffeinate .* -w $KWCA" >/dev/null; then
+  fail "internal caffeinate still running after keepawake stopped (SIGINT)"
+else
+  pass "internal caffeinate exits when keepawake is stopped (SIGINT)"
 fi
 
-if system_profiler SPDisplaysDataType 2>/dev/null | grep -qi "Sidecar"; then
-  if grep -qi "sidecar display is currently connected" /tmp/kw_cursor_warn.log; then
-    pass "additional Sidecar-specific warning shown when Sidecar is connected"
-  else
-    fail "expected Sidecar-specific addendum not found"
-  fi
+"$KEEPAWAKE" --force -d -s >/tmp/kw_caffeinate_flags.log 2>&1 &
+KWCB=$!
+disown
+sleep 1
+if pgrep -f "caffeinate -ds -w $KWCB" >/dev/null; then
+  pass "-d -s flags passed through to internal caffeinate"
 else
-  skip "Sidecar-specific addendum check (no Sidecar currently connected)"
+  fail "expected 'caffeinate -ds -w $KWCB', not found"
 fi
-kill -INT "$KWC" 2>/dev/null
-wait_for_exit "$KWC"
+kill -INT "$KWCB" 2>/dev/null
+wait_for_exit "$KWCB"
+
+"$KEEPAWAKE" --force -d -i -m -s -u >/tmp/kw_caffeinate_allflags.log 2>&1 &
+KWCC=$!
+disown
+sleep 1
+if pgrep -f "caffeinate -dimsu -w $KWCC" >/dev/null; then
+  pass "all five assertion flags (-d -i -m -s -u) passed through together"
+else
+  fail "expected 'caffeinate -dimsu -w $KWCC', not found"
+fi
+kill -INT "$KWCC" 2>/dev/null
+wait_for_exit "$KWCC"
+
+section "Command wrapping"
+
+"$KEEPAWAKE" --force -- sh -c "exit 7" >/tmp/kw_wrap_exit.log 2>&1 &
+KWE=$!
+wait "$KWE" 2>/dev/null
+WRAP_EXIT=$?
+if [ "$WRAP_EXIT" -eq 7 ]; then
+  pass "wrapped command's exit code is propagated"
+else
+  fail "expected exit 7 from wrapped command, got $WRAP_EXIT"
+fi
+if grep -q "wrapped command exited (status 7)" /tmp/kw_wrap_exit.log; then
+  pass "wrapped-command-exit message printed"
+else
+  fail "expected wrapped-command-exit message not found"
+fi
+if pgrep -f "caffeinate .* -w $KWE" >/dev/null; then
+  fail "internal caffeinate leaked after wrapped command exited on its own"
+else
+  pass "internal caffeinate cleaned up after wrapped command exited on its own"
+fi
+
+"$KEEPAWAKE" --force -- sleep 30 >/tmp/kw_wrap_signal.log 2>&1 &
+KWW=$!
+disown
+sleep 1
+WRAPPED_PID=$(pgrep -P "$KWW" -f sleep)
+if [ -n "$WRAPPED_PID" ]; then
+  pass "wrapped command started as a child of keepawake"
+else
+  fail "could not find wrapped 'sleep' child process"
+fi
+kill -INT "$KWW" 2>/dev/null
+wait_for_exit "$KWW"
+sleep 1
+if [ -n "$WRAPPED_PID" ] && kill -0 "$WRAPPED_PID" 2>/dev/null; then
+  fail "wrapped command still running after keepawake was interrupted"
+else
+  pass "wrapped command is terminated when keepawake receives SIGINT"
+fi
+
+"$KEEPAWAKE" --force -w 1 -- echo hi >/tmp/kw_mutex.log 2>&1
+if [ $? -ne 0 ] && grep -q "mutually exclusive" /tmp/kw_mutex.log; then
+  pass "-w and a wrapped command are rejected together"
+else
+  fail "expected a mutual-exclusivity error for -w + wrapped command"
+fi
+
+section "-w (wait on external pid)"
+
+sleep 30 &
+TARGET_PID=$!
+disown
+"$KEEPAWAKE" --force -w "$TARGET_PID" >/tmp/kw_waitpid.log 2>&1 &
+KWWP=$!
+disown
+sleep 1
+if kill -0 "$KWWP" 2>/dev/null; then
+  pass "keepawake stays running while the -w target pid is alive"
+else
+  fail "keepawake exited early while target pid was still alive"
+fi
+kill "$TARGET_PID" 2>/dev/null
+if wait_for_exit "$KWWP" 5; then
+  pass "keepawake stops once the -w target pid exits"
+else
+  fail "keepawake did not stop after target pid exited"
+  kill -9 "$KWWP" 2>/dev/null
+fi
+
+"$KEEPAWAKE" --force -w 999999 >/tmp/kw_waitpid_bad.log 2>&1
+if [ $? -ne 0 ] && grep -q "no such process" /tmp/kw_waitpid_bad.log; then
+  pass "-w rejects a nonexistent pid"
+else
+  fail "expected '-w 999999' to fail with 'no such process'"
+fi
+
+cleanup_stray_processes
 
 if [ "$SKIP_HARDWARE_TESTS" -eq 1 ]; then
   skip "virtual display creation/sizing/clamshell tests (external display already attached)"

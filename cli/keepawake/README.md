@@ -13,13 +13,26 @@ how this was discovered and validated, including known limitations.
 ## Use
 
 ```
-./keepawake              # run until Ctrl-C
-./keepawake -t 3600      # run for 1 hour, then stop automatically
-./keepawake --force      # skip the pre-flight warnings below
+./keepawake                    # run until Ctrl-C
+./keepawake -t 3600            # run for 1 hour, then stop automatically
+./keepawake --force            # skip the pre-flight warnings below
+./keepawake -disu               # hold every caffeinate assertion too
+./keepawake -- ./backup.sh     # run a command, stop when it exits
+./keepawake -w 1234            # stop when pid 1234 exits
 ```
 
-Run it before closing the lid; Ctrl-C (or the `--duration` timer elapsing)
-releases the hold and lets normal clamshell sleep resume immediately.
+Run it before closing the lid; Ctrl-C (or the `--duration` timer elapsing,
+or a wrapped command/`-w` pid exiting) releases the hold and lets normal
+sleep resume immediately.
+
+`keepawake` is meant as a drop-in replacement for `caffeinate`, not just a
+clamshell patch: the phantom display defeats hardware-enforced clamshell
+sleep, and it also spawns `/usr/bin/caffeinate` internally (tied to its own
+PID via `-w`) to hold the same `-disu` assertions `caffeinate` would, so
+ordinary idle/display/disk sleep is covered too. See `-h`/`--help` for the
+full flag reference — the assertion flags (`-d -i -m -s -u`), `-t`
+duration, `-w pid`, and trailing-command wrapping all match `caffeinate`'s
+own semantics.
 
 ## Pre-flight warnings
 

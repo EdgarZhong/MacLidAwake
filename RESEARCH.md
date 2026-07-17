@@ -142,6 +142,20 @@ signal; see "Verifying it yourself" below.
   focus leaves the machine entirely. No known mitigation; disable
   Universal Control when using `keepawake`.
 
+## Idle/display/disk sleep is a separate mechanism from clamshell sleep
+
+The virtual display only defeats the hardware-enforced *clamshell* check —
+it has no effect on ordinary idle-sleep, display-sleep, or disk-sleep
+timers, which are gated by `IOPMAssertion`, not by anything display-related.
+A `keepawake` session with the lid closed (or open) could still idle-sleep
+on its own timer if nothing were holding those assertions.
+
+`keepawake` closes that gap by spawning `/usr/bin/caffeinate` as an internal
+child rather than reimplementing `IOPMAssertionCreateWithName` bindings —
+same assertion semantics, already correct, already maintained by Apple.
+Its lifetime is tied to `keepawake`'s own PID via `-w`, so it self-releases
+on any exit path, including a `kill -9` that bypasses every signal handler.
+
 ## Known gaps — not yet tested
 
 - Whether this holds over a multi-hour closed duration (only 30 seconds is

@@ -20,6 +20,14 @@ BetterDisplay use, no kext, no physical hardware. That's enough to satisfy
 whatever check gates clamshell sleep: with it running, the lid can be
 closed indefinitely and the Mac stays fully awake and working.
 
+The phantom display only defeats that hardware-enforced clamshell check —
+it does nothing about ordinary idle/display/disk sleep, which is a separate
+mechanism. So `keepawake` also runs `/usr/bin/caffeinate` internally
+(tied to its own lifetime via `-w`) to hold the same assertions plain
+`caffeinate` would. That makes it a full drop-in replacement for
+`caffeinate`, not just a clamshell-only patch — including `-w pid` and
+wrapping a command, the same way `caffeinate` does.
+
 See [RESEARCH.md](RESEARCH.md) for the technical findings behind this —
 what's confirmed on Intel vs. Apple Silicon, how the virtual display
 mechanism behaves, and every current limitation. Read it before trusting
@@ -39,13 +47,15 @@ broadly confirmed across the M-series lineup.
 ```
 cd cli/keepawake
 ./build.sh
-./keepawake              # run until Ctrl-C
-./keepawake -t 3600      # run for 1 hour, then stop automatically
+./keepawake                    # run until Ctrl-C
+./keepawake -t 3600            # run for 1 hour, then stop automatically
+./keepawake -- ./backup.sh     # run a command, stop when it exits
 ```
 
-Run it before closing the lid. Ctrl-C (or the `--duration` timer elapsing)
-releases the hold and lets normal clamshell sleep resume immediately. Full
-CLI usage: [cli/keepawake/README.md](cli/keepawake/README.md).
+Run it before closing the lid. Ctrl-C (or the `--duration` timer elapsing,
+or a wrapped command exiting) releases the hold and lets normal sleep
+resume immediately. Full CLI usage, including the `caffeinate`-compatible
+`-d -i -m -s -u -w` flags: [cli/keepawake/README.md](cli/keepawake/README.md).
 
 ## Known limitations
 
@@ -82,10 +92,12 @@ CLI usage: [cli/keepawake/README.md](cli/keepawake/README.md).
 
 Automated coverage: build, argument parsing, pre-flight warnings, virtual
 display creation/sizing/naming, the clamshell-sleep property flip, clean
-shutdown (SIGINT/SIGTERM), `--duration` auto-stop, and single-instance
-locking. What it can't cover: whether the machine actually stays awake
-through a *real* physical lid close — there's no software way to simulate
-that, so it remains a manual test (protocol in RESEARCH.md).
+shutdown (SIGINT/SIGTERM), `--duration` auto-stop, single-instance locking,
+the internal `caffeinate` assertion holder (flags, cleanup, orphan
+prevention), `-w pid` waiting, and command-wrapping (exit-code propagation,
+signal forwarding). What it can't cover: whether the machine actually stays
+awake through a *real* physical lid close — there's no software way to
+simulate that, so it remains a manual test (protocol in RESEARCH.md).
 
 ## License
 

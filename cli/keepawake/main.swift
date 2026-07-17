@@ -14,22 +14,41 @@ let toolName = "keepawake"
 
 func printUsage() {
     print("""
-    Usage: \(toolName) [options]
+    Usage: \(toolName) [-disu] [-t seconds] [-w pid] [-f] [command [arg ...]]
 
-    Prevents this Mac from sleeping when the lid is closed, without any
-    external display or hardware, by holding open a tiny software-only
-    virtual display (no kext, no dummy HDMI plug required).
+    Prevents this Mac from sleeping — lid closed or open — without any
+    external display or hardware. Holds open a tiny software-only virtual
+    display to defeat hardware-enforced clamshell sleep (no kext, no dummy
+    HDMI plug required), and internally runs `caffeinate` to hold the same
+    sleep assertions it would, so this is a drop-in replacement rather than
+    just a clamshell-only patch.
 
-    Options:
-      -t, --duration <seconds>   Automatically stop after this many seconds
-                                  (like `caffeinate -t`). Default: run until
-                                  Ctrl-C.
+    Assertion flags (same meaning as caffeinate; passed straight through):
+      -d                          Prevent display sleep.
+      -i                          Prevent idle system sleep.
+      -m                          Prevent disk idle sleep.
+      -s                          Prevent system sleep (AC power only).
+      -u                          Declare the user is active.
+                                  Default if none of -disu given: -i.
+
+    Session bounds:
+      -t, --duration <seconds>   Automatically stop after this many seconds.
+      -w <pid>                   Wait for an existing process to exit, then
+                                  stop. Mutually exclusive with a wrapped
+                                  command below.
+      command [arg ...]          Run this command, hold the sleep-prevention
+                                  for its duration, then stop and exit with
+                                  its exit status (like `caffeinate cmd`).
+                                  Use `--` before it if it starts with `-`.
+
+    Other:
       -f, --force                Skip safety warnings (battery power, Sidecar
                                   connected, non-Apple-Silicon Mac, etc.) and
                                   run anyway.
       -h, --help                 Show this help and exit.
 
-    Press Ctrl-C to stop and let the lid close normally again.
+    With no -t/-w/command given, runs until Ctrl-C, which stops it and lets
+    normal sleep resume immediately.
     """)
 }
 
@@ -46,11 +65,19 @@ func die(_ message: String) -> Never {
 
 var duration: Double?
 var force = false
+var assertDisplay = false
+var assertIdle = false
+var assertDisk = false
+var assertSystem = false
+var assertUser = false
+var waitPid: pid_t?
+var commandArgs: [String] = []
 
 let args = Array(CommandLine.arguments.dropFirst())
 var i = 0
 while i < args.count {
-    switch args[i] {
+    let arg = args[i]
+    switch arg {
     case "-h", "--help":
         printUsage()
         exit(0)
@@ -62,10 +89,53 @@ while i < args.count {
             die("--duration requires a positive number of seconds")
         }
         duration = secs
+    case "-d":
+        assertDisplay = true
+    case "-i":
+        assertIdle = true
+    case "-m":
+        assertDisk = true
+    case "-s":
+        assertSystem = true
+    case "-u":
+        assertUser = true
+    case "-w":
+        i += 1
+        guard i < args.count, let pid = Int32(args[i]), pid > 0 else {
+            die("-w requires a positive process ID")
+        }
+        waitPid = pid
+    case "--":
+        // Everything after `--` is the wrapped command, verbatim — including
+        // tokens that look like our own flags.
+        commandArgs = Array(args[(i + 1)...])
     default:
-        die("unknown argument '\(args[i])' (see --help)")
+        if arg.hasPrefix("-") {
+            die("unknown argument '\(arg)' (see --help)")
+        }
+        // First non-flag token starts the wrapped command, like caffeinate:
+        // everything from here on (including further `-`-prefixed tokens)
+        // belongs to the command, not to us.
+        commandArgs = Array(args[i...])
+    }
+    if !commandArgs.isEmpty {
+        break
     }
     i += 1
+}
+
+if waitPid != nil && !commandArgs.isEmpty {
+    die("-w and a wrapped command are mutually exclusive — use one or the other")
+}
+
+if let targetPid = waitPid, kill(targetPid, 0) != 0 {
+    die("-w \(targetPid): no such process")
+}
+
+// Match caffeinate's own default: if no assertion flag was given, hold just
+// the idle-sleep assertion.
+if !assertDisplay && !assertIdle && !assertDisk && !assertSystem && !assertUser {
+    assertIdle = true
 }
 
 // ---- Single-instance lock ----
@@ -302,7 +372,89 @@ guard let display = display else {
 // screen corner adjacent to the real display, which is an acceptable resting
 // spot on its own — see the cursor-drift warning below for the residual risk.
 
-print("\(toolName): running (virtual display \(Int(targetWidth))x\(Int(targetHeight)), Ctrl-C to stop)")
+// ---- Internal caffeinate: hold the same sleep assertions caffeinate would ----
+//
+// The virtual display above only defeats the hardware-enforced clamshell
+// check — it does nothing about ordinary idle/display/disk sleep, which is
+// governed separately via IOPMAssertion. Rather than reimplement that in
+// Swift, shell out to the system's own `caffeinate` and tie its lifetime to
+// ours via `-w <our pid>`: however we exit — clean signal, --duration,
+// thermal bailout, or even a `kill -9` that bypasses every handler below —
+// caffeinate notices we're gone and releases its assertions on its own, with
+// no explicit cleanup required on our end for that path. The explicit
+// `teardown()` below (called on every normal exit path) is just to make
+// cleanup prompt rather than waiting on caffeinate's own polling interval.
+
+var caffeinateFlags = ""
+if assertDisplay { caffeinateFlags += "d" }
+if assertIdle { caffeinateFlags += "i" }
+if assertDisk { caffeinateFlags += "m" }
+if assertSystem { caffeinateFlags += "s" }
+if assertUser { caffeinateFlags += "u" }
+
+var caffeinateProcess: Process?
+do {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+    proc.arguments = ["-\(caffeinateFlags)", "-w", String(ProcessInfo.processInfo.processIdentifier)]
+    proc.standardOutput = FileHandle.nullDevice
+    proc.standardError = FileHandle.nullDevice
+    try proc.run()
+    caffeinateProcess = proc
+} catch {
+    warn("""
+    couldn't start the internal `caffeinate -\(caffeinateFlags)` assertion \
+    holder (\(error)). The virtual display still prevents clamshell sleep, \
+    but ordinary idle/display/disk sleep will not be held off.
+    """)
+}
+
+var wrappedProcess: Process?
+
+func teardown() {
+    if let caff = caffeinateProcess, caff.isRunning {
+        caff.terminate()
+    }
+    if let wrapped = wrappedProcess, wrapped.isRunning {
+        wrapped.terminate()
+    }
+}
+
+// ---- Optional: wrap a command ----
+//
+// Mirrors `caffeinate command [args...]`: run it as a child, hold the sleep
+// prevention for as long as it's alive, then stop and exit with its status.
+if !commandArgs.isEmpty {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    proc.arguments = commandArgs
+    proc.standardInput = FileHandle.standardInput
+    proc.standardOutput = FileHandle.standardOutput
+    proc.standardError = FileHandle.standardError
+    proc.terminationHandler = { finished in
+        print("\(toolName): wrapped command exited (status \(finished.terminationStatus)), stopping")
+        teardown()
+        exit(finished.terminationStatus)
+    }
+    do {
+        try proc.run()
+    } catch {
+        die("couldn't run '\(commandArgs[0])': \(error)")
+    }
+    wrappedProcess = proc
+}
+
+let statusSuffix: String
+if !commandArgs.isEmpty {
+    statusSuffix = "wrapping '\(commandArgs.joined(separator: " "))'"
+} else if let targetPid = waitPid {
+    statusSuffix = "waiting on pid \(targetPid)"
+} else if let duration = duration {
+    statusSuffix = "auto-stopping in \(Int(duration))s"
+} else {
+    statusSuffix = "Ctrl-C to stop"
+}
+print("\(toolName): running (virtual display \(Int(targetWidth))x\(Int(targetHeight)), caffeinate -\(caffeinateFlags), \(statusSuffix))")
 fflush(stdout)
 
 // ---- Thermal safety net ----
@@ -315,6 +467,7 @@ NotificationCenter.default.addObserver(
     if ProcessInfo.processInfo.thermalState == .critical {
         FileHandle.standardError.write(
             "\(toolName): thermal state critical — releasing the sleep hold\n".data(using: .utf8)!)
+        teardown()
         exit(0)
     }
 }
@@ -328,6 +481,7 @@ NotificationCenter.default.addObserver(
 
 func handleShutdownSignal(_ sig: Int32) {
     print("\n\(toolName): stopping")
+    teardown()
     exit(0)
 }
 signal(SIGINT, handleShutdownSignal)
@@ -336,6 +490,20 @@ signal(SIGTERM, handleShutdownSignal)
 if let duration = duration {
     DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
         print("\(toolName): duration elapsed, stopping")
+        teardown()
+        exit(0)
+    }
+}
+
+// -w waits on a process we didn't spawn (no terminationHandler available for
+// a non-child pid) — poll for it instead.
+if let targetPid = waitPid {
+    DispatchQueue.global().async {
+        while kill(targetPid, 0) == 0 {
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        print("\(toolName): pid \(targetPid) exited, stopping")
+        teardown()
         exit(0)
     }
 }
