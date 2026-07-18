@@ -8,7 +8,8 @@ disproven theories and discovery play-by-play are not.
 
 Everything in this document confirmed by actual testing on Apple Silicon was
 tested on exactly one machine: **MacBook Pro (16"), Apple M5 Max, macOS
-26.5.2.** That includes the pixel cap (`~1,654,400`) and the
+26.5.2.** That includes the pixel cap (somewhere between 1,662,600 and
+1,684,900 total pixels — see "Operational facts" below) and the
 phantom-display-prevents-sleep result itself. Neither has been checked on
 any other Apple Silicon chip (M1/M2/M3/M4, or other M5 variants) or macOS
 version — treat both as "true on this one machine, unconfirmed elsewhere"
@@ -103,17 +104,38 @@ signal; see "Verifying it yourself" below.
 
 ## Operational facts about the virtual display
 
-- **Extend, not Mirror.** Mirroring forces both displays to one shared
-  resolution/mode, dragging the real (Retina) display down to the virtual
-  display's non-Retina mode — visibly blurry. Extend keeps each display at
-  its own native resolution.
-- **Sizing**: reliable down to 2x2 pixels. A very small size (128x128)
-  failed once — `apply()` reported success but the display never
-  registered as a real `NSScreen` or in `system_profiler`. Stick to sizes
-  at or above what's confirmed working. `CGVirtualDisplay` also enforces a
-  hard cap around 1.65 million total pixels (an unaccelerated software
-  framebuffer limit) — `keepawake` scales down from the real display's
-  resolution to fit under that.
+- **Sizing and the pixel cap, in Extend mode.** Reliable down to 2x2
+  pixels; 128x128 failed once (`apply()` succeeded but never registered —
+  stick to sizes at or above what's confirmed working). On the high end,
+  the boundary is roughly 1,662,600–1,684,900 total pixels, not a clean
+  number; `keepawake` targets ~1,652,000, comfortably under it. This only
+  matters for the 16" MacBook Pro in practice: every other current
+  M-series MacBook's default point resolution (13"/13.6" Air, 14" Pro —
+  1.3–1.5M pixels) already fits under the cap with no scaling needed. Only
+  the 16" Pro's own default (1728x1117 = 1.93M, the machine everything
+  here was tested on) exceeds it, and only by a modest ~1.16x.
+- **Exceeding the cap doesn't fail — it silently substitutes a different,
+  unpredictable resolution, and `apply()` still returns `true`.** E.g.
+  1920x1080 → 960x540, 1660x1015 → 1024x626 — aspect-preserving but
+  otherwise not a documented or derivable formula. How much of the budget
+  gets used scales with how far over you ask (~30% at 1.0–1.4x overage, up
+  to 100% by ~4.7x) — real screens sit in the worst-utilization range, so
+  "just request native and trust the fallback" isn't a substitute for
+  computing a size that deliberately fits under the cap, which is what
+  `keepawake` already does. Severity-tested up to 4.6x over (the 16"
+  Pro's actual native pixel count, the realistic worst case if scaling
+  logic were ever bypassed): the smallest substitution seen was still
+  ~26x larger than the known small-size failure zone (128x128), so going
+  over looks safe in practice, just wasteful if relied on carelessly.
+- **Extend vs Mirror is about direction, not a blanket rule.** Mirroring
+  the virtual display via macOS's normal automatic setup drags the real
+  Retina panel down to the virtual's lower resolution — visibly blurry,
+  why `keepawake` uses Extend. But explicitly setting the *virtual*
+  display as mirror slave to the real one
+  (`CGConfigureDisplayMirrorOfDisplay`) leaves the real display untouched
+  at full native resolution with no pixel-cap concern at all — a
+  confirmed, safe alternative sizing strategy, not implemented or decided
+  on.
 - **One-time consent dialog.** The first time a given virtual display
   identity is seen, WindowServer shows "What do you want to show on
   '[name]'?" (Entire Screen / Window or App / Extended Display), with a
@@ -155,6 +177,21 @@ child rather than reimplementing `IOPMAssertionCreateWithName` bindings —
 same assertion semantics, already correct, already maintained by Apple.
 Its lifetime is tied to `keepawake`'s own PID via `-w`, so it self-releases
 on any exit path, including a `kill -9` that bypasses every signal handler.
+
+Two places where `keepawake` deliberately diverges from real `caffeinate`,
+confirmed by testing the real thing rather than assuming:
+- **Signal-killed wrapped commands**: real `caffeinate` execs directly into
+  the wrapped command, so the shell reports a killed child the normal way
+  (128+signal). `keepawake` has to stay alive itself, so it spawns the
+  command as a genuine child instead — `Process.terminationStatus` is a raw
+  signal number in that case, not an exit code, so `keepawake` translates it
+  to 128+signal itself to match what a directly-run `caffeinate` would show.
+- **`-t`/`-w` combined with a wrapped command**: real `caffeinate` silently
+  ignores both the moment a command is given (confirmed: a watched `-w` pid
+  and a `-t` timeout are both completely unused, not composed). `keepawake`
+  rejects the combination instead — silently ignoring a flag someone typed
+  is worse than an upfront error, since if it would do nothing, it almost
+  certainly wasn't meant to be there.
 
 ## Known gaps — not yet tested
 

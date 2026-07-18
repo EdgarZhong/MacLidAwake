@@ -31,11 +31,10 @@ func printUsage() {
       -u                          Declare the user is active.
                                   Default if none of -disu given: -i.
 
-    Session bounds:
+    Session bounds (pick exactly one — mutually exclusive):
       -t, --duration <seconds>   Automatically stop after this many seconds.
       -w <pid>                   Wait for an existing process to exit, then
-                                  stop. Mutually exclusive with a wrapped
-                                  command below.
+                                  stop.
       command [arg ...]          Run this command, hold the sleep-prevention
                                   for its duration, then stop and exit with
                                   its exit status (like `caffeinate cmd`).
@@ -89,16 +88,6 @@ while i < args.count {
             die("--duration requires a positive number of seconds")
         }
         duration = secs
-    case "-d":
-        assertDisplay = true
-    case "-i":
-        assertIdle = true
-    case "-m":
-        assertDisk = true
-    case "-s":
-        assertSystem = true
-    case "-u":
-        assertUser = true
     case "-w":
         i += 1
         guard i < args.count, let pid = Int32(args[i]), pid > 0 else {
@@ -110,13 +99,31 @@ while i < args.count {
         // tokens that look like our own flags.
         commandArgs = Array(args[(i + 1)...])
     default:
-        if arg.hasPrefix("-") {
+        // Matches caffeinate's own combined short-flag syntax: `-dis` means
+        // `-d -i -s`, not just the single flags `-d`, `-i`, `-m`, `-s`, `-u`
+        // individually. Validated all-or-nothing so a typo like `-dx`
+        // doesn't silently apply `-d` before rejecting `x`.
+        let flagChars = arg.hasPrefix("-") ? arg.dropFirst() : ""
+        let validFlags = Set("dimsu")
+        if arg.hasPrefix("-"), !flagChars.isEmpty, flagChars.allSatisfy({ validFlags.contains($0) }) {
+            for ch in flagChars {
+                switch ch {
+                case "d": assertDisplay = true
+                case "i": assertIdle = true
+                case "m": assertDisk = true
+                case "s": assertSystem = true
+                case "u": assertUser = true
+                default: break
+                }
+            }
+        } else if arg.hasPrefix("-") {
             die("unknown argument '\(arg)' (see --help)")
+        } else {
+            // First non-flag token starts the wrapped command, like
+            // caffeinate: everything from here on (including further
+            // `-`-prefixed tokens) belongs to the command, not to us.
+            commandArgs = Array(args[i...])
         }
-        // First non-flag token starts the wrapped command, like caffeinate:
-        // everything from here on (including further `-`-prefixed tokens)
-        // belongs to the command, not to us.
-        commandArgs = Array(args[i...])
     }
     if !commandArgs.isEmpty {
         break
@@ -124,8 +131,15 @@ while i < args.count {
     i += 1
 }
 
-if waitPid != nil && !commandArgs.isEmpty {
-    die("-w and a wrapped command are mutually exclusive — use one or the other")
+// caffeinate itself silently ignores -t/-w when a command is given (a
+// command's own lifetime is already the natural session bound, confirmed
+// against the real thing — see RESEARCH.md). Deliberately not matched here:
+// silently ignoring a flag the user typed is a worse failure mode than
+// erroring — if it would do nothing, it almost certainly wasn't meant to be
+// there, and an upfront error catches that immediately instead of leaving
+// someone to notice much later that a session ran far longer than expected.
+if !commandArgs.isEmpty, waitPid != nil || duration != nil {
+    die("-t/--duration and -w are mutually exclusive with a wrapped command — a command's own lifetime already bounds the session; drop -t/-w or the command.")
 }
 
 if let targetPid = waitPid, kill(targetPid, 0) != 0 {
@@ -293,11 +307,17 @@ if !force {
 // ---- Determine sizing and create the virtual display ----
 //
 // CGVirtualDisplay appears to enforce a hard cap on total pixels (an
-// unaccelerated software framebuffer limit, not a real GPU output) — found
-// empirically at ~1,654,400 pixels, but only tested on one machine (see the
-// "Device support" note in RESEARCH.md). Rather than trust that number
-// blindly on hardware/macOS versions it's never been checked against, start
-// there and halve down if `apply()` actually rejects it.
+// unaccelerated software framebuffer limit, not a real GPU output) —
+// found empirically to sit somewhere between 1,662,600 (fine) and
+// 1,684,900 (not fine) pixels, on one machine only (see "Device support"
+// and "Operational facts" in RESEARCH.md). Rather than trust that number
+// blindly on hardware/macOS versions it's never been checked against,
+// start comfortably under it and halve down further if `apply()` actually
+// rejects a size. Note this only catches an explicit `apply()` failure —
+// RESEARCH.md also documents requests *above* the cap silently succeeding
+// at a different, unrequested resolution instead of failing. That's not
+// something this loop can detect or needs to: any registered display,
+// right-sized or not, satisfies keepawake's actual requirement.
 //
 // NOTE: an `NSScreen.screens.count` check was tried here as an extra
 // verification (RESEARCH.md documents `apply()` once reporting success
@@ -432,9 +452,20 @@ if !commandArgs.isEmpty {
     proc.standardOutput = FileHandle.standardOutput
     proc.standardError = FileHandle.standardError
     proc.terminationHandler = { finished in
-        print("\(toolName): wrapped command exited (status \(finished.terminationStatus)), stopping")
+        // Real caffeinate execs directly into the wrapped command, so the
+        // shell reports a signal-killed child the normal way (128+signal).
+        // keepawake instead spawns it as a genuine child process (it has to,
+        // to stay alive itself and manage the virtual display/caffeinate),
+        // so Process.terminationStatus is a raw signal number when
+        // terminationReason == .uncaughtSignal, not an exit code — translate
+        // it to match what the shell would show for a directly-run process,
+        // confirmed against real caffeinate's own behavior (see RESEARCH.md).
+        let exitCode = finished.terminationReason == .uncaughtSignal
+            ? 128 + finished.terminationStatus
+            : finished.terminationStatus
+        print("\(toolName): wrapped command exited (status \(exitCode)), stopping")
         teardown()
-        exit(finished.terminationStatus)
+        exit(exitCode)
     }
     do {
         try proc.run()
@@ -496,7 +527,8 @@ if let duration = duration {
 }
 
 // -w waits on a process we didn't spawn (no terminationHandler available for
-// a non-child pid) — poll for it instead.
+// a non-child pid) — poll for it instead. (Never coexists with commandArgs —
+// enforced upfront by the mutual-exclusivity die() above.)
 if let targetPid = waitPid {
     DispatchQueue.global().async {
         while kill(targetPid, 0) == 0 {

@@ -277,11 +277,18 @@ else
   pass "wrapped command is terminated when keepawake receives SIGINT"
 fi
 
-"$KEEPAWAKE" --force -w 1 -- echo hi >/tmp/kw_mutex.log 2>&1
-if [ $? -ne 0 ] && grep -q "mutually exclusive" /tmp/kw_mutex.log; then
-  pass "-w and a wrapped command are rejected together"
+"$KEEPAWAKE" --force -w 1 -- echo hi >/tmp/kw_mutex_w.log 2>&1
+if [ $? -ne 0 ] && grep -q "mutually exclusive" /tmp/kw_mutex_w.log; then
+  pass "-w and a wrapped command are rejected together (deliberately not matching caffeinate's silent-ignore here — see RESEARCH.md)"
 else
   fail "expected a mutual-exclusivity error for -w + wrapped command"
+fi
+
+"$KEEPAWAKE" --force -t 100 -- echo hi >/tmp/kw_mutex_t.log 2>&1
+if [ $? -ne 0 ] && grep -q "mutually exclusive" /tmp/kw_mutex_t.log; then
+  pass "--duration and a wrapped command are rejected together"
+else
+  fail "expected a mutual-exclusivity error for -t + wrapped command"
 fi
 
 section "-w (wait on external pid)"
