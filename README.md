@@ -68,12 +68,11 @@ findings, and every known limitation. It's more thorough than this README.
 
 ## Known limitations
 
-- **Cursor and window drift.** The virtual display always sits adjacent to your
-  real one; parking it elsewhere doesn't work, because WindowServer silently
-  discards the request. Your cursor can reach it by crossing the bottom-right
-  corner of your screen, and with Universal Control enabled it can continue onto
-  a nearby Mac/iPad. Disable Universal Control to rule that out. The CLI warns
-  about this every time it starts.
+- **Cursor and window drift.** The virtual display is parked at the bottom-right
+  outer edge of your arrangement so it doesn't displace your real displays, but
+  your cursor can still reach it there. With Universal Control enabled it can
+  continue from there onto a nearby Mac/iPad; disable Universal Control to rule
+  that out. The CLI warns about this every time it starts.
 - **Reduced resolution.** `CGVirtualDisplay` caps out around 1.65 million total
   pixels (an unaccelerated software framebuffer, not a real GPU output), so the
   phantom display is scaled down from your real resolution rather than matched

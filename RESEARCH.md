@@ -49,14 +49,19 @@ newer hardware enforcement anyway.
   scriptable even as root; it's gated by code-signing and entitlements, not Unix
   privilege. Its "Set as Default" checkbox is system-wide, not per-display, and
   there's no known way to reset it short of System Settings' privacy reset.
-- **Can't be repositioned.** `CGConfigureDisplayOrigin` reports success, but the
-  display always snaps adjacent to the main display regardless of the requested
-  origin. keepawake doesn't attempt it. WindowServer parks it in a screen corner,
-  which is an acceptable resting spot on its own.
-- **Cursor and window drift.** The cursor can cross onto the virtual display via
-  its screen corner. Windows or the Dock dragged onto it become invisible until
-  the process is killed, which migrates them back to the real display. No known
-  fix.
+- **Positioning works, within limits.** macOS keeps arrangements gap-free, so
+  `CGConfigureDisplayOrigin` can't float the phantom off in empty space; it
+  clamps the requested origin to a contiguous position. But it does honor which
+  outer edge the phantom attaches to: request a far-off origin and it parks at
+  the far right/left/bottom, past the real displays, which keep their positions
+  (verified on a 3-display setup, the requested edge origin is applied exactly).
+  keepawake uses this to park the phantom at the far-right edge, bottom-aligned
+  to its neighbor, and re-parks on every display reconfiguration.
+- **Cursor and window drift.** Even parked at the outer edge, the cursor can
+  cross onto the virtual display where it meets its neighbor. Windows or the Dock
+  dragged onto it become invisible until the process is killed, which migrates
+  them back to the real display. Parking keeps it out of the main working area
+  but doesn't eliminate this.
 - **Universal Control hazard.** If enabled, the cursor can travel through the
   virtual display onto a nearby Mac signed into the same iCloud account, taking
   input focus off the machine entirely. Disable Universal Control when using
@@ -81,6 +86,11 @@ code comments in `main.swift`, next to the logic they justify.)
   sleep exists partly for thermal and battery protection, so this is worth ruling
   out as a bag-overheating risk. The CLI's battery pre-flight warning covers it
   in the meantime.
+- Initial parking is verified live (parked exactly, no real display displaced),
+  but re-parking triggered by a physical monitor hotplug uses the same path via
+  a reconfiguration callback and hasn't been confirmed on real hardware. Worst
+  case if the callback misbehaves is cosmetic: the phantom stays wedged where a
+  newly-connected display pushed it until the next layout change.
 
 ## Verifying it yourself
 

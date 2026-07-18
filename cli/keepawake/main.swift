@@ -267,20 +267,17 @@ func connectedDisplayTypeLines() -> [String] {
 }
 
 if !force {
-    // Always shown, not just when Sidecar is connected right now: the
-    // virtual display always sits adjacent to the real one (attempts to
-    // park it elsewhere via CGConfigureDisplayOrigin were confirmed not to
-    // work; see RESEARCH.md), so the cursor can always reach its corner.
-    // Whether that then routes onto a nearby Mac depends on Universal
-    // Control being enabled, which isn't reliably detectable from here,
-    // so this warns unconditionally rather than under-warning.
+    // Always shown, not just when Sidecar is connected right now: the phantom
+    // is parked at the bottom-right outer edge (see the parking logic below),
+    // but the cursor can still reach it there. Whether that then routes onto a
+    // nearby Mac depends on Universal Control being enabled, which isn't
+    // reliably detectable from here, so this warns unconditionally.
     warn("""
-    your cursor can reach this tool's virtual display by crossing the \
-    bottom-right corner of your screen (no working way to prevent this \
-    has been found). If Universal Control is enabled, this has been \
-    observed to route the cursor onward onto a nearby Mac/iPad. Disable \
-    Universal Control if you want to rule that out. Re-run with --force \
-    to suppress this warning.
+    this tool's virtual display is parked at the bottom-right outer edge of \
+    your screen arrangement, but your cursor can still reach it there. If \
+    Universal Control is enabled, this has been observed to route the cursor \
+    onward onto a nearby Mac/iPad. Disable Universal Control if you want to \
+    rule that out. Re-run with --force to suppress this warning.
     """)
     let displayTypes = connectedDisplayTypeLines()
     if displayTypes.contains(where: { $0.contains("Sidecar") }) {
@@ -357,11 +354,63 @@ guard let display = display else {
     """)
 }
 
-// No repositioning: CGConfigureDisplayOrigin is confirmed non-functional for a
-// virtual display (WindowServer discards the origin; see RESEARCH.md), so that
-// code was removed rather than left as a no-op that looked like a mitigation.
-// WindowServer parks it in a screen corner anyway; the cursor-drift warning
-// above covers the residual risk.
+// ---- Park the virtual display out of the way ----
+//
+// Left alone, WindowServer inserts the phantom mid-arrangement and displaces
+// real displays (with two externals attached, it lands between them). Shove it
+// to the far-right outer edge instead, bottom-aligned to its neighbor, so the
+// real displays keep their positions. macOS keeps arrangements gap-free, so
+// CGConfigureDisplayOrigin can't float the phantom off in empty space; it clamps
+// the request to a contiguous spot. But it does honor which outer edge the
+// phantom attaches to, which is all we need. Verified on a 3-display setup: the
+// requested edge origin is applied exactly and no real display moves.
+
+var phantomDisplayID: CGDirectDisplayID?
+
+func parkPhantom() {
+    guard let vid = phantomDisplayID else { return }
+    var count: UInt32 = 0
+    CGGetActiveDisplayList(0, nil, &count)
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return }
+
+    // Rightmost real display (exclude the phantom itself) is the neighbor we
+    // attach past and bottom-align to.
+    guard let neighbor = ids.filter({ $0 != vid })
+        .map({ CGDisplayBounds($0) })
+        .max(by: { $0.maxX < $1.maxX })
+    else { return }
+
+    let targetX = Int32(neighbor.maxX)
+    let targetY = Int32(neighbor.maxY - CGDisplayBounds(vid).height)
+
+    // Already parked? Do nothing, so our own move can't retrigger the reconfig
+    // callback into an endless re-park loop.
+    let cur = CGDisplayBounds(vid)
+    if Int32(cur.origin.x) == targetX, Int32(cur.origin.y) == targetY { return }
+
+    var cfg: CGDisplayConfigRef?
+    guard CGBeginDisplayConfiguration(&cfg) == .success, let cfg = cfg else { return }
+    CGConfigureDisplayOrigin(cfg, vid, targetX, targetY)
+    CGCompleteDisplayConfiguration(cfg, .forSession)
+}
+
+// Re-park whenever the display layout changes (a monitor connects, the
+// arrangement is edited), since that can wedge the phantom back into the middle.
+// Must be a non-capturing function to serve as a C callback. Ignore changes to
+// the phantom itself so our own re-park move doesn't loop, and defer the re-park
+// off the callback (starting a new configuration from inside it is unsafe).
+func displayReconfigured(_ display: CGDirectDisplayID,
+                         _ flags: CGDisplayChangeSummaryFlags,
+                         _ userInfo: UnsafeMutableRawPointer?) {
+    if flags.contains(.beginConfigurationFlag) { return }
+    if display == phantomDisplayID { return }
+    DispatchQueue.main.async { parkPhantom() }
+}
+
+phantomDisplayID = display.displayID
+parkPhantom()
+CGDisplayRegisterReconfigurationCallback(displayReconfigured, nil)
 
 // ---- Internal caffeinate: hold the assertions the virtual display doesn't ----
 //

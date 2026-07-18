@@ -166,8 +166,8 @@ else
   KWC=$!
   disown
   sleep 1
-  if grep -qi "cursor can reach" /tmp/kw_cursor_warn.log; then
-    pass "cursor-drift warning shown unconditionally (origin-parking is known broken, so this always applies)"
+  if grep -qi "cursor can still reach" /tmp/kw_cursor_warn.log; then
+    pass "cursor-drift warning shown unconditionally (phantom is parked at the edge but still reachable)"
   else
     fail "expected cursor-drift warning not found"
   fi
@@ -395,19 +395,19 @@ EOF
       fail "virtual display size mismatch (got ${PHANTOM_W}x${PHANTOM_H}, expected ~${EXP_W}x${EXP_H})"
     fi
 
-    # keepawake makes no attempt to reposition the virtual display (see
-    # RESEARCH.md: CGConfigureDisplayOrigin is confirmed non-functional here,
-    # so that code was removed rather than kept as a no-op). WindowServer's
-    # default placement is expected to land it adjacent to the main display,
-    # in a corner; assert that placement, not a gap that was never real.
+    # keepawake parks the phantom at the far-right outer edge, bottom-aligned to
+    # its neighbor (see RESEARCH.md; positioning works, it just clamps to a
+    # contiguous edge). On a single-display machine the neighbor is the main
+    # display, so the phantom's left edge should sit exactly at the main
+    # display's right edge. Assert that.
     ADJACENT=$(python3 -c "
 main_x1 = $MAIN_X + $MAIN_W
 print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
 ")
     if [ "$ADJACENT" == "yes" ]; then
-      pass "virtual display lands adjacent to main display bounds (expected default placement, no parking attempted)"
+      pass "virtual display parked at the main display's right edge (far-right, as intended)"
     else
-      fail "virtual display placement changed from the expected adjacent-corner default (got phantom x=$PHANTOM_X, main right edge=$((MAIN_X + MAIN_W)))"
+      fail "virtual display not parked at the expected far-right edge (got phantom x=$PHANTOM_X, main right edge=$((MAIN_X + MAIN_W)))"
     fi
   else
     fail "could not read screen geometry to check sizing/placement"

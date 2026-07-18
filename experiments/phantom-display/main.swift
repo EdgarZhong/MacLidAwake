@@ -53,11 +53,12 @@ print("Virtual display created. CGDirectDisplayID = \(display.displayID)")
 print("Active display count now: \(NSScreen.screens.count)")
 fflush(stdout)
 
-// Attempt to park the display far outside the main display's bounds so the
-// cursor can't cross onto it. NOTE: this was later confirmed NOT to work.
-// CGConfigureDisplayOrigin reports success but WindowServer ignores the origin
-// and snaps the display adjacent to the main one anyway (see RESEARCH.md). Kept
-// here as a record of what was tried; the shipping CLI omits it.
+// Park the display far outside the main display's bounds. NOTE: macOS keeps
+// arrangements gap-free, so it clamps this to an outer edge rather than letting
+// the display float off in the distance; the display does move to that edge,
+// though. The shipping CLI uses exactly this to park the phantom deliberately
+// (far-right, bottom-aligned; see RESEARCH.md). It doesn't stop the cursor
+// reaching the phantom at the shared edge.
 let mainBounds = CGDisplayBounds(CGMainDisplayID())
 let parkOrigin = CGPoint(x: mainBounds.maxX + 5000, y: mainBounds.origin.y + 5000)
 var config: CGDisplayConfigRef?
