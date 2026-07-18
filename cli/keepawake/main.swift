@@ -1,10 +1,7 @@
-// keepawake — prevent clamshell sleep with no external hardware.
-//
-// Holds open a tiny software-only virtual display via the private
-// CGVirtualDisplay API (see experiments/phantom-display and RESEARCH.md for
-// how this was discovered/validated). No kext, no dummy HDMI plug. Run it
-// before closing the lid; Ctrl-C (or --duration elapsing) releases the hold
-// and lets normal clamshell sleep resume.
+// keepawake: prevent clamshell sleep with no external hardware, by holding open
+// a software-only virtual display via the private CGVirtualDisplay API.
+// See RESEARCH.md for why this works, and experiments/phantom-display for the
+// original proof of concept.
 
 import Cocoa
 import CoreGraphics
@@ -16,7 +13,7 @@ func printUsage() {
     print("""
     Usage: \(toolName) [-disu] [-t seconds] [-w pid] [-f] [command [arg ...]]
 
-    Prevents this Mac from sleeping — lid closed or open — without any
+    Prevents this Mac from sleeping (lid closed or open) without any
     external display or hardware. Holds open a tiny software-only virtual
     display to defeat hardware-enforced clamshell sleep (no kext, no dummy
     HDMI plug required), and internally runs `caffeinate` to hold the same
@@ -31,7 +28,7 @@ func printUsage() {
       -u                          Declare the user is active.
                                   Default if none of -disu given: -i.
 
-    Session bounds (pick exactly one — mutually exclusive):
+    Session bounds (pick exactly one, mutually exclusive):
       -t, --duration <seconds>   Automatically stop after this many seconds.
       -w <pid>                   Wait for an existing process to exit, then
                                   stop.
@@ -95,14 +92,13 @@ while i < args.count {
         }
         waitPid = pid
     case "--":
-        // Everything after `--` is the wrapped command, verbatim — including
+        // Everything after `--` is the wrapped command, verbatim, including
         // tokens that look like our own flags.
         commandArgs = Array(args[(i + 1)...])
     default:
-        // Matches caffeinate's own combined short-flag syntax: `-dis` means
-        // `-d -i -s`, not just the single flags `-d`, `-i`, `-m`, `-s`, `-u`
-        // individually. Validated all-or-nothing so a typo like `-dx`
-        // doesn't silently apply `-d` before rejecting `x`.
+        // Matches caffeinate's combined short-flag syntax: `-dis` means
+        // `-d -i -s`. Validated all-or-nothing so a typo like `-dx` doesn't
+        // apply `-d` before rejecting `x`.
         let flagChars = arg.hasPrefix("-") ? arg.dropFirst() : ""
         let validFlags = Set("dimsu")
         if arg.hasPrefix("-"), !flagChars.isEmpty, flagChars.allSatisfy({ validFlags.contains($0) }) {
@@ -131,15 +127,12 @@ while i < args.count {
     i += 1
 }
 
-// caffeinate itself silently ignores -t/-w when a command is given (a
-// command's own lifetime is already the natural session bound, confirmed
-// against the real thing — see RESEARCH.md). Deliberately not matched here:
-// silently ignoring a flag the user typed is a worse failure mode than
-// erroring — if it would do nothing, it almost certainly wasn't meant to be
-// there, and an upfront error catches that immediately instead of leaving
-// someone to notice much later that a session ran far longer than expected.
+// caffeinate silently ignores -t/-w when a command is given (the command's
+// lifetime is the natural bound). We error instead: silently dropping a flag the
+// user typed is the worse failure, since it could let a session run far longer
+// than intended.
 if !commandArgs.isEmpty, waitPid != nil || duration != nil {
-    die("-t/--duration and -w are mutually exclusive with a wrapped command — a command's own lifetime already bounds the session; drop -t/-w or the command.")
+    die("-t/--duration and -w can't be combined with a wrapped command; the command's own lifetime already bounds the session.")
 }
 
 if let targetPid = waitPid, kill(targetPid, 0) != 0 {
@@ -154,15 +147,11 @@ if !assertDisplay && !assertIdle && !assertDisk && !assertSystem && !assertUser 
 
 // ---- Single-instance lock ----
 //
-// Nothing else stops two `keepawake` processes running at once, which would
-// create two identically-identified virtual displays. Use flock(2) on an
-// open file descriptor held for the life of the process rather than a
-// check-then-write PID file: the check-and-create was two separate
-// operations with a race between them (two simultaneous launches could both
-// pass the check), and a PID file also needs manual staleness detection for
-// crashed holders. flock is atomic and the kernel releases it automatically
-// on any exit path — signal, --duration, thermal-critical, early die(), or
-// a crash — so there's nothing to clean up and nothing that can go stale.
+// Two keepawake processes would create two identically-identified virtual
+// displays. flock(2) on a held file descriptor is atomic (unlike a
+// check-then-write PID file, where two launches could both pass the check), and
+// the kernel releases it on any exit path, so there's nothing to clean up or go
+// stale.
 
 let lockFilePath = NSTemporaryDirectory() + "keepawake.lock"
 let lockFD = open(lockFilePath, O_CREAT | O_RDWR, 0o644)
@@ -177,20 +166,18 @@ if flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
     }
     die("keepawake is already running. Stop it first.")
 }
-// We hold the lock; record our PID purely so a future contender can report
-// it in the message above. Not load-bearing for correctness.
+// Record our PID so a future contender can name it in its error. Not
+// load-bearing for correctness.
 ftruncate(lockFD, 0)
 let pidString = "\(ProcessInfo.processInfo.processIdentifier)\n"
 _ = pidString.withCString { write(lockFD, $0, strlen($0)) }
 
 // ---- Private API availability check ----
 //
-// CGVirtualDisplay is undocumented and unsupported — Apple can rename or
-// remove it in any macOS release with no notice. This can't catch every
-// possible failure mode (a fully-removed class could fail at the dynamic
-// linker level before any of our code runs at all), but it catches the
-// more likely case of the class still loading while behaving differently,
-// with a clear message instead of a confusing crash.
+// CGVirtualDisplay is undocumented; Apple can rename or remove it in any macOS
+// release. This won't catch a fully-removed class (that fails at the dynamic
+// linker before our code runs), but it catches the class still loading while
+// behaving differently, with a clear message instead of a crash.
 guard NSClassFromString("CGVirtualDisplay") != nil,
     NSClassFromString("CGVirtualDisplayDescriptor") != nil,
     NSClassFromString("CGVirtualDisplaySettings") != nil
@@ -198,22 +185,19 @@ else {
     die("""
     the private CGVirtualDisplay API this tool depends on doesn't appear \
     to be available on this macOS version. This is undocumented, \
-    unsupported API — Apple can change or remove it at any time, and \
+    unsupported API. Apple can change or remove it at any time, and \
     there is no fallback if it's gone.
     """)
 }
 
 // ---- Pre-flight checks ----
 
-// A compile-time `#if arch(x86_64)` check here would test the architecture
-// this binary was built for, not the actual host CPU — an x86_64 slice
-// running under Rosetta on real Apple Silicon would wrongly hit this guard
-// (telling a machine that genuinely needs keepawake to go use `pmset`
-// instead, which wouldn't work there). Check the real hardware at runtime:
-// a native arm64 build is always Apple Silicon, and for an x86_64 build,
-// `sysctl.proc_translated` distinguishes "running under Rosetta on Apple
-// Silicon" (exists, reads 1) from "genuinely running on Intel" (the sysctl
-// doesn't exist at all pre-Apple-Silicon).
+// Check the real hardware at runtime, not the build arch: a compile-time
+// `#if arch(x86_64)` would test what the binary was built for, so an x86_64
+// slice under Rosetta on Apple Silicon would wrongly hit the Intel guard. A
+// native arm64 build is always Apple Silicon; for an x86_64 build,
+// `sysctl.proc_translated` reads 1 under Rosetta and doesn't exist at all on
+// genuine Intel.
 func isRunningOnAppleSilicon() -> Bool {
     #if arch(arm64)
     return true
@@ -231,12 +215,12 @@ if !isRunningOnAppleSilicon() && !force {
     die("""
     this Mac appears to be Intel-based. The hardware-level clamshell-sleep \
     enforcement this tool works around was introduced with Apple Silicon \
-    (macOS Ventura+) — on Intel, `sudo pmset -a disablesleep 1` already \
+    (macOS Ventura+). On Intel, `sudo pmset -a disablesleep 1` already \
     prevents clamshell sleep without any of this (confirmed by testing). \
     Note that plain `caffeinate` does NOT: it only blocks idle/display \
     sleep, never lid-closed sleep, on any Mac. --force will let you run \
     this anyway, but on the one Intel Mac this has actually been tested on, \
-    the virtual display never registered at any size — `pmset` is very \
+    the virtual display never registered at any size, so `pmset` is very \
     likely your only real option here, not just the easier one.
     """)
 }
@@ -286,15 +270,15 @@ if !force {
     // Always shown, not just when Sidecar is connected right now: the
     // virtual display always sits adjacent to the real one (attempts to
     // park it elsewhere via CGConfigureDisplayOrigin were confirmed not to
-    // work — see RESEARCH.md), so the cursor can always reach its corner.
+    // work; see RESEARCH.md), so the cursor can always reach its corner.
     // Whether that then routes onto a nearby Mac depends on Universal
-    // Control being enabled, which isn't reliably detectable from here —
+    // Control being enabled, which isn't reliably detectable from here,
     // so this warns unconditionally rather than under-warning.
     warn("""
     your cursor can reach this tool's virtual display by crossing the \
     bottom-right corner of your screen (no working way to prevent this \
     has been found). If Universal Control is enabled, this has been \
-    observed to route the cursor onward onto a nearby Mac/iPad — disable \
+    observed to route the cursor onward onto a nearby Mac/iPad. Disable \
     Universal Control if you want to rule that out. Re-run with --force \
     to suppress this warning.
     """)
@@ -306,28 +290,17 @@ if !force {
 
 // ---- Determine sizing and create the virtual display ----
 //
-// CGVirtualDisplay appears to enforce a hard cap on total pixels (an
-// unaccelerated software framebuffer limit, not a real GPU output) —
-// found empirically to sit somewhere between 1,662,600 (fine) and
-// 1,684,900 (not fine) pixels, on one machine only (see "Device support"
-// and "Operational facts" in RESEARCH.md). Rather than trust that number
-// blindly on hardware/macOS versions it's never been checked against,
-// start comfortably under it and halve down further if `apply()` actually
-// rejects a size. Note this only catches an explicit `apply()` failure —
-// RESEARCH.md also documents requests *above* the cap silently succeeding
-// at a different, unrequested resolution instead of failing. That's not
-// something this loop can detect or needs to: any registered display,
-// right-sized or not, satisfies keepawake's actual requirement.
+// CGVirtualDisplay caps total pixels (a software-framebuffer limit) somewhere
+// between 1,662,600 and 1,684,900 on the one machine tested (see RESEARCH.md).
+// Start under it and halve down if `apply()` rejects a size, rather than
+// trusting that number on untested hardware. A request above the cap silently
+// registers a smaller resolution instead of failing, which is fine: any
+// registered display satisfies the clamshell check, right-sized or not.
 //
-// NOTE: an `NSScreen.screens.count` check was tried here as an extra
-// verification (RESEARCH.md documents `apply()` once reporting success
-// without the display actually registering), but proved unreliable: checked
-// from within the same process that calls `apply()`, `NSScreen.screens`
-// never updated even after a multi-second wait, in this bare-script
-// (non-`NSApplication`) execution context — even though the display had, in
-// fact, registered at the OS level the whole time (confirmed externally via
-// `system_profiler` from a separate process). `apply()`'s own return value
-// is the only in-process signal that's actually reliable here.
+// An `NSScreen.screens.count` sanity check was tried and dropped: in this bare
+// CFRunLoop (non-NSApplication) context it never updated even when the display
+// had registered (confirmed externally via `system_profiler`). `apply()`'s
+// return value is the only reliable in-process signal.
 
 guard let mainScreen = NSScreen.main else {
     die("couldn't read the main display's resolution")
@@ -335,7 +308,7 @@ guard let mainScreen = NSScreen.main else {
 let pointSize = mainScreen.frame.size
 let requestedPixels = Double(pointSize.width) * Double(pointSize.height)
 let startingPixelCap = 1_654_400.0
-let minPixels = 4.0 // 2x2 — the smallest size confirmed to register as a real screen.
+let minPixels = 4.0 // 2x2, the smallest size confirmed to register as a real screen.
 
 var candidatePixels = min(requestedPixels, startingPixelCap)
 var display: CGVirtualDisplay?
@@ -377,33 +350,27 @@ guard let display = display else {
     die("""
     failed to create the virtual display at any size down to \
     \(Int(minPixels)) pixels. CGVirtualDisplay may be unavailable, or may \
-    behave differently, on this macOS version or device — this is \
+    behave differently, on this macOS version or device. This is \
     undocumented, unsupported API with no further fallback. If you can, \
     please report this (device model + macOS version) so RESEARCH.md's \
     device-support notes can be updated.
     """)
 }
 
-// No attempt is made to reposition the display: CGConfigureDisplayOrigin is
-// confirmed non-functional for a CGVirtualDisplay-backed display (WindowServer
-// silently discards the requested origin — see RESEARCH.md), so that code was
-// removed rather than kept as a no-op that looked like a working mitigation.
-// In practice WindowServer's default placement already tucks it into a
-// screen corner adjacent to the real display, which is an acceptable resting
-// spot on its own — see the cursor-drift warning below for the residual risk.
+// No repositioning: CGConfigureDisplayOrigin is confirmed non-functional for a
+// virtual display (WindowServer discards the origin; see RESEARCH.md), so that
+// code was removed rather than left as a no-op that looked like a mitigation.
+// WindowServer parks it in a screen corner anyway; the cursor-drift warning
+// above covers the residual risk.
 
-// ---- Internal caffeinate: hold the same sleep assertions caffeinate would ----
+// ---- Internal caffeinate: hold the assertions the virtual display doesn't ----
 //
-// The virtual display above only defeats the hardware-enforced clamshell
-// check — it does nothing about ordinary idle/display/disk sleep, which is
-// governed separately via IOPMAssertion. Rather than reimplement that in
-// Swift, shell out to the system's own `caffeinate` and tie its lifetime to
-// ours via `-w <our pid>`: however we exit — clean signal, --duration,
-// thermal bailout, or even a `kill -9` that bypasses every handler below —
-// caffeinate notices we're gone and releases its assertions on its own, with
-// no explicit cleanup required on our end for that path. The explicit
-// `teardown()` below (called on every normal exit path) is just to make
-// cleanup prompt rather than waiting on caffeinate's own polling interval.
+// The virtual display only defeats the hardware clamshell check; idle, display,
+// and disk sleep go through IOPMAssertion separately. Shell out to the system
+// `caffeinate` rather than reimplement it, tied to our PID via `-w` so it
+// self-releases however we exit, including a `kill -9` that bypasses every
+// handler below. The explicit `teardown()` on normal exit paths just makes
+// release prompt rather than waiting on caffeinate's own poll interval.
 
 var caffeinateFlags = ""
 if assertDisplay { caffeinateFlags += "d" }
@@ -452,14 +419,11 @@ if !commandArgs.isEmpty {
     proc.standardOutput = FileHandle.standardOutput
     proc.standardError = FileHandle.standardError
     proc.terminationHandler = { finished in
-        // Real caffeinate execs directly into the wrapped command, so the
-        // shell reports a signal-killed child the normal way (128+signal).
-        // keepawake instead spawns it as a genuine child process (it has to,
-        // to stay alive itself and manage the virtual display/caffeinate),
-        // so Process.terminationStatus is a raw signal number when
-        // terminationReason == .uncaughtSignal, not an exit code — translate
-        // it to match what the shell would show for a directly-run process,
-        // confirmed against real caffeinate's own behavior (see RESEARCH.md).
+        // Real caffeinate execs into the command, so a signal shows up as
+        // 128+signal. We spawn it as a child instead, so terminationStatus is a
+        // raw signal number when terminationReason == .uncaughtSignal. Translate
+        // it to match what the shell shows for a directly-run process (confirmed
+        // against real caffeinate).
         let exitCode = finished.terminationReason == .uncaughtSignal
             ? 128 + finished.terminationStatus
             : finished.terminationStatus
@@ -497,7 +461,7 @@ NotificationCenter.default.addObserver(
 ) { _ in
     if ProcessInfo.processInfo.thermalState == .critical {
         FileHandle.standardError.write(
-            "\(toolName): thermal state critical — releasing the sleep hold\n".data(using: .utf8)!)
+            "\(toolName): thermal state critical, releasing the sleep hold\n".data(using: .utf8)!)
         teardown()
         exit(0)
     }
@@ -505,10 +469,10 @@ NotificationCenter.default.addObserver(
 
 // ---- Clean shutdown on Ctrl-C / termination ----
 //
-// A DispatchSource-based handler was tried first but never fired here —
-// this script drives its run loop with bare CFRunLoopRun(), which doesn't
-// reliably pump the main GCD queue the way an app-framework run loop does.
-// A plain C signal handler doesn't depend on that integration.
+// A DispatchSource handler was tried first but never fired: this script drives
+// its run loop with bare CFRunLoopRun(), which doesn't reliably pump the main
+// GCD queue the way an app-framework run loop does. A plain C signal handler
+// doesn't depend on that.
 
 func handleShutdownSignal(_ sig: Int32) {
     print("\n\(toolName): stopping")
@@ -526,9 +490,9 @@ if let duration = duration {
     }
 }
 
-// -w waits on a process we didn't spawn (no terminationHandler available for
-// a non-child pid) — poll for it instead. (Never coexists with commandArgs —
-// enforced upfront by the mutual-exclusivity die() above.)
+// -w waits on a process we didn't spawn (no terminationHandler for a non-child
+// pid), so poll it. Never coexists with a wrapped command; enforced by the
+// mutual-exclusivity check above.
 if let targetPid = waitPid {
     DispatchQueue.global().async {
         while kill(targetPid, 0) == 0 {

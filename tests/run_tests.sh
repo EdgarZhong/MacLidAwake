@@ -9,7 +9,7 @@
 #
 # What this CANNOT verify: whether the machine actually stays awake through
 # a real physical lid close. There is no software path to simulate
-# AppleClamshellState — that remains a manual test (see RESEARCH.md).
+# AppleClamshellState; that remains a manual test (see RESEARCH.md).
 #
 # Tests that assume a clean single-display baseline are skipped if a real
 # external display is already attached.
@@ -30,7 +30,7 @@ skip() { echo "  SKIP: $1"; SKIP=$((SKIP + 1)); }
 section() { echo ""; echo "== $1 =="; }
 
 display_type_count() {
-  # NOTE: "Display Type:" is only present for real/built-in displays —
+  # NOTE: "Display Type:" is only present for real/built-in displays,
   # CGVirtualDisplay-backed entries omit that key entirely. "Resolution:"
   # is present on every display entry we've observed, real or virtual.
   system_profiler SPDisplaysDataType 2>/dev/null | grep -c "Resolution:"
@@ -46,7 +46,7 @@ screen_info() {
 }
 
 # Poll until a PID actually exits (and its lock/display are gone) instead of
-# guessing a fixed sleep duration — avoids flaky races between test sections.
+# guessing a fixed sleep duration; avoids flaky races between test sections.
 wait_for_exit() {
   local pid="$1"
   local timeout="${2:-5}"
@@ -135,7 +135,7 @@ fi
 section "Pre-flight warnings"
 
 # These warnings only fire without --force, and only after the Intel-arch
-# guard — which itself requires --force to get past on Intel (see the
+# guard, which itself requires --force to get past on Intel (see the
 # "refuses to run on Intel without --force" check above). So on Intel,
 # without --force, the process dies at the arch guard before ever reaching
 # this code; there's no way to observe these warnings there without also
@@ -187,7 +187,7 @@ fi
 
 # The sections below (caffeinate integration, command wrapping, -w) don't
 # depend on a single-display baseline or on the phantom display actually
-# registering with WindowServer — on Intel, apply() reports success even
+# registering with WindowServer; on Intel, apply() reports success even
 # though nothing really registers (see RESEARCH.md), so these still exercise
 # real code paths there. Only the "Virtual display creation" and
 # clamshell-property assertions further down are genuinely
@@ -278,14 +278,14 @@ else
 fi
 
 "$KEEPAWAKE" --force -w 1 -- echo hi >/tmp/kw_mutex_w.log 2>&1
-if [ $? -ne 0 ] && grep -q "mutually exclusive" /tmp/kw_mutex_w.log; then
-  pass "-w and a wrapped command are rejected together (deliberately not matching caffeinate's silent-ignore here — see RESEARCH.md)"
+if [ $? -ne 0 ] && grep -q "can't be combined with a wrapped command" /tmp/kw_mutex_w.log; then
+  pass "-w and a wrapped command are rejected together (deliberately not matching caffeinate's silent-ignore here; see RESEARCH.md)"
 else
   fail "expected a mutual-exclusivity error for -w + wrapped command"
 fi
 
 "$KEEPAWAKE" --force -t 100 -- echo hi >/tmp/kw_mutex_t.log 2>&1
-if [ $? -ne 0 ] && grep -q "mutually exclusive" /tmp/kw_mutex_t.log; then
+if [ $? -ne 0 ] && grep -q "can't be combined with a wrapped command" /tmp/kw_mutex_t.log; then
   pass "--duration and a wrapped command are rejected together"
 else
   fail "expected a mutual-exclusivity error for -t + wrapped command"
@@ -399,7 +399,7 @@ EOF
     # RESEARCH.md: CGConfigureDisplayOrigin is confirmed non-functional here,
     # so that code was removed rather than kept as a no-op). WindowServer's
     # default placement is expected to land it adjacent to the main display,
-    # in a corner — assert that placement, not a gap that was never real.
+    # in a corner; assert that placement, not a gap that was never real.
     ADJACENT=$(python3 -c "
 main_x1 = $MAIN_X + $MAIN_W
 print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
@@ -418,7 +418,7 @@ print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
   if [ "$RUNNING_CLAMSHELL" == "No" ]; then
     pass "AppleClamshellCausesSleep reads No with virtual display active"
   else
-    fail "AppleClamshellCausesSleep reads $RUNNING_CLAMSHELL (note: this property has been observed to be an unreliable instantaneous read in manual testing — a failure here is worth rechecking by hand, not necessarily proof the mechanism is broken)"
+    fail "AppleClamshellCausesSleep reads $RUNNING_CLAMSHELL (note: this property has been observed to be an unreliable instantaneous read in manual testing; a failure here is worth rechecking by hand, not necessarily proof the mechanism is broken)"
   fi
 
   section "Instance locking"
@@ -452,7 +452,7 @@ print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
   if grep -q "running (virtual display" /tmp/kw_relock.log; then
     pass "lock released after SIGINT teardown (new instance started fine)"
   else
-    fail "lock not released after SIGINT teardown — new instance could not start"
+    fail "lock not released after SIGINT teardown; new instance could not start"
   fi
 
   "$KEEPAWAKE" --force >/tmp/kw_run2.log 2>&1 &
@@ -503,7 +503,7 @@ fi
 
 section "Known not automatable"
 echo "  Confirming the machine actually stays awake through a REAL physical"
-echo "  lid close is not covered here — there is no software path to"
+echo "  lid close is not covered here; there is no software path to"
 echo "  simulate AppleClamshellState. This suite validates every mechanism"
 echo "  up to that point. See RESEARCH.md's \"Verifying it yourself\" section."
 
