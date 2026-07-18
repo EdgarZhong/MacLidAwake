@@ -48,7 +48,7 @@ Via Homebrew:
 
 ```
 brew tap ecc521/keepawake
-brew install keepawake
+brew install ecc521/keepawake/keepawake
 ```
 
 Or build from source directly:
