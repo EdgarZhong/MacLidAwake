@@ -44,9 +44,23 @@ broadly confirmed across the M-series lineup.
 
 ## Quick start
 
+Via Homebrew:
+
+```
+brew tap ecc521/keepawake
+brew install keepawake
+```
+
+Or build from source directly:
+
 ```
 cd cli/keepawake
 ./build.sh
+```
+
+Either way (drop the leading `./` if you installed via Homebrew):
+
+```
 ./keepawake                    # run until Ctrl-C
 ./keepawake -t 3600            # run for 1 hour, then stop automatically
 ./keepawake -- ./backup.sh     # run a command, stop when it exits

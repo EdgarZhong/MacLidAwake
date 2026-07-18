@@ -2,9 +2,19 @@
 
 Prevents an Apple Silicon Mac from sleeping when the lid is closed — no
 external display, no dummy HDMI plug, no kext. See `../../RESEARCH.md` for
-how this was discovered and validated, including known limitations.
+the technical findings behind this, including known limitations.
 
-## Build
+## Install
+
+Via Homebrew:
+
+```
+brew tap ecc521/keepawake
+brew install keepawake
+```
+
+Or build from source directly (drop the leading `./` below if installed via
+Homebrew):
 
 ```
 ./build.sh
