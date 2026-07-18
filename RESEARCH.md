@@ -6,50 +6,24 @@ disproven theories and discovery play-by-play are not.
 
 ## Device support
 
-Everything in this document confirmed by actual testing on Apple Silicon was
-tested on exactly one machine: **MacBook Pro (16"), Apple M5 Max, macOS
-26.5.2.** That includes the pixel cap (somewhere between 1,662,600 and
-1,684,900 total pixels — see "Operational facts" below) and the
-phantom-display-prevents-sleep result itself. Neither has been checked on
-any other Apple Silicon chip (M1/M2/M3/M4, or other M5 variants) or macOS
-version — treat both as "true on this one machine, unconfirmed elsewhere"
-rather than a universal fact.
+### What works
 
-The CLI degrades safely if the pixel cap turns out to be lower elsewhere: it
-retries at progressively smaller sizes rather than assuming the number
-above, and only fails outright if no size down to 2x2 works. If you hit that
-failure (or anything else that contradicts this document) on different
-hardware, that's worth reporting — this note should get more data points
-over time, not stay a single anecdote.
+**Apple Silicon (M1 or later), macOS Ventura or later.** A software-only
+virtual display, created via the private `CGVirtualDisplay` CoreGraphics
+API, prevents clamshell sleep — confirmed by direct lid-close testing.
+Confirmed on exactly one machine: **MacBook Pro (16"), Apple M5 Max, macOS
+26.5.2.** Other Apple Silicon chips and models (M1–M4, other M5 variants)
+are assumed to work the same way but haven't been independently tested.
 
-**Intel: confirmed not to work, on one machine.** Tested on a MacBook Pro15,3
-(Intel UHD Graphics 630 + Radeon Pro Vega 20, only the built-in display
-active), macOS 15.7.7, from a local Terminal session (ruling out an earlier
-false lead — see below). `CGVirtualDisplay.apply()` returned `true` at every
-size tried — native resolution, the M5's cap-fitted size, 800x600, and 2x2 —
-but the display never registered with WindowServer at any of them (checked
-via `system_profiler`, which correctly listed the real built-in display each
-time, ruling out a tooling/grep mistake). This isn't the same failure mode
-as the Apple Silicon pixel cap: there, sizes under the cap register
-reliably and only oversized requests silently fail; here, *nothing*
-registers, at any size, including ones well within the Apple Silicon cap.
-Whether this is specific to this dual-GPU Intel configuration, Intel Macs
-generally, or this macOS version isn't known — one data point, not tested
-elsewhere. Moot for `keepawake`'s actual purpose either way, since
-`pmset -a disablesleep 1` already solves Intel without any of this — but it
-does mean `--force` on Intel is very unlikely to actually work if anyone
-tries it, beyond just being unnecessary.
+### What doesn't work
 
-An earlier attempt to test this same question over SSH gave an identical
-"apply() true, never registers" result at every size, which looked like the
-same finding — but that test turned out to be confounded (visibly, by a
-black-screen flash reported live during testing) and was re-run properly
-from a local session before being trusted. The SSH context lacked any TCC
-permission grants for the ad-hoc-signed test binary, which is a plausible
-explanation for a silent non-registration on its own, independent of
-architecture. The result above is the clean re-test; the SSH run is not
-being relied on for this conclusion, just noted so the same detour isn't
-repeated.
+**Intel.** The virtual display never registers, at any size — tested on a
+MacBook Pro15,3 (Intel UHD Graphics 630 + Radeon Pro Vega 20), macOS
+15.7.7. Not needed anyway: `sudo pmset -a disablesleep 1` already prevents
+clamshell sleep on Intel (confirmed by direct testing), which is what
+`keepawake`'s Intel guard points to instead of trying `--force` there.
+Plain `caffeinate` does **not** work for this on any Mac, Intel included —
+it only blocks idle/display sleep, never lid-closed sleep.
 
 ## Constraints
 
@@ -60,47 +34,20 @@ repeated.
    kext-based tools (InsomniaX / Frizlab's `Insomnia`) haven't been updated
    to fight the newer hardware enforcement anyway.
 
-## Intel Macs: this tool isn't needed
-
-`sudo pmset -a disablesleep 1` prevents clamshell sleep on Intel — confirmed
-by direct testing (lid closed 3+ minutes; no new `Clamshell Sleep` entry in
-`pmset -g log`; `SleepDisabled` stayed `1`). No virtual display, no private
-API required.
-
-Plain `caffeinate` does **not** do this — it only blocks idle/display sleep
-via `IOPMAssertion`, and never touches lid-closed sleep at all, on any Mac.
-`keepawake`'s Intel guard points at `pmset -a disablesleep 1` specifically,
-not `caffeinate`, for that reason.
-
-## Apple Silicon (Ventura+): hardware-enforced, needs a workaround
+## Why this works on Apple Silicon
 
 Starting with Ventura, Apple Silicon Macs enforce clamshell sleep at the
 hardware level via `IOPMrootDomain` — closing the lid sleeps the machine
 unless a real external display is attached, full stop. `caffeinate`,
-`IOPMAssertion`, and `pmset -a disablesleep 1` do **not** override this when
-no display is attached (unlike on Intel, where the last one does).
-
-**A software-only virtual display, created via the private `CGVirtualDisplay`
-CoreGraphics API, is sufficient to prevent clamshell sleep** — confirmed by
-direct lid-close testing (MacBook Pro, M5 Max, macOS 26.5.2):
-- Control (no virtual display): lid closed 5s → clean sleep cycle appears in
-  `pmset -g log` within seconds.
-- Test (virtual display running): lid closed 30s → zero sleep-related log
-  entries; the machine stayed fully awake throughout.
+`IOPMAssertion`, and `pmset -a disablesleep 1` do **not** override this
+(unlike on Intel, where the last one does).
 
 This is architecturally a bit surprising — the clamshell decision is
 understood to route through `AppleGraphicsControl`/AGDC, which normally
 reasons about real DisplayPort/HDMI/eDP hotplug (EDID) data, and
-`CGVirtualDisplay` has no corresponding physical connector — but empirically,
-no real `IOFramebuffer`/EDID detection turns out to be required. This is the
-mechanism `keepawake` uses.
-
-`AppleClamshellCausesSleep` (`ioreg -r -k AppleClamshellCausesSleep`) flips
-`Yes` → `No` while the virtual display is running, but treat that as a
-secondary signal only — an instantaneous read of it has been observed to be
-unreliable (reading `No` on a machine that in fact sleeps on every real lid
-close). `pmset -g log` history after an actual lid-close test is the real
-signal; see "Verifying it yourself" below.
+`CGVirtualDisplay` has no corresponding physical connector — but
+empirically, no real `IOFramebuffer`/EDID detection turns out to be
+required. This is the mechanism `keepawake` uses.
 
 ## Operational facts about the virtual display
 
@@ -177,21 +124,9 @@ child rather than reimplementing `IOPMAssertionCreateWithName` bindings —
 same assertion semantics, already correct, already maintained by Apple.
 Its lifetime is tied to `keepawake`'s own PID via `-w`, so it self-releases
 on any exit path, including a `kill -9` that bypasses every signal handler.
-
-Two places where `keepawake` deliberately diverges from real `caffeinate`,
-confirmed by testing the real thing rather than assuming:
-- **Signal-killed wrapped commands**: real `caffeinate` execs directly into
-  the wrapped command, so the shell reports a killed child the normal way
-  (128+signal). `keepawake` has to stay alive itself, so it spawns the
-  command as a genuine child instead — `Process.terminationStatus` is a raw
-  signal number in that case, not an exit code, so `keepawake` translates it
-  to 128+signal itself to match what a directly-run `caffeinate` would show.
-- **`-t`/`-w` combined with a wrapped command**: real `caffeinate` silently
-  ignores both the moment a command is given (confirmed: a watched `-w` pid
-  and a `-t` timeout are both completely unused, not composed). `keepawake`
-  rejects the combination instead — silently ignoring a flag someone typed
-  is worse than an upfront error, since if it would do nothing, it almost
-  certainly wasn't meant to be there.
+(A couple of places where `keepawake` deliberately doesn't mirror real
+`caffeinate`'s own behavior exactly are documented as code comments in
+`main.swift`, next to the logic they justify, rather than duplicated here.)
 
 ## Known gaps — not yet tested
 
@@ -205,7 +140,8 @@ confirmed by testing the real thing rather than assuming:
 ## Verifying it yourself
 
 `pmset -g log | grep -i clamshell | tail -5` before and after a deliberate
-lid close/reopen is the ground truth — not an instantaneous
-`AppleClamshellCausesSleep` read (see above for why). `experiments/clamshell-watch.sh`
-polls the same properties in real time if you want to watch it live instead
-of checking the log after the fact.
+lid close/reopen is the ground truth. Don't trust an instantaneous
+`ioreg -r -k AppleClamshellCausesSleep` read instead — it's been observed
+to read `No` on a machine that in fact sleeps on every real lid close.
+`experiments/clamshell-watch.sh` polls the same properties in real time if
+you want to watch it live rather than checking the log after the fact.

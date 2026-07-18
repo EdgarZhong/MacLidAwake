@@ -12,27 +12,6 @@ external display is attached, full stop. `caffeinate` and the public
 around it is a real external monitor (or a physical dummy HDMI/DisplayPort
 plug) — exactly the hardware dependency this project exists to avoid.
 
-## How it works
-
-`keepawake` creates a tiny, software-only virtual display via the private
-`CGVirtualDisplay` CoreGraphics API — the same mechanism apps like
-BetterDisplay use, no kext, no physical hardware. That's enough to satisfy
-whatever check gates clamshell sleep: with it running, the lid can be
-closed indefinitely and the Mac stays fully awake and working.
-
-The phantom display only defeats that hardware-enforced clamshell check —
-it does nothing about ordinary idle/display/disk sleep, which is a separate
-mechanism. So `keepawake` also runs `/usr/bin/caffeinate` internally
-(tied to its own lifetime via `-w`) to hold the same assertions plain
-`caffeinate` would. That makes it a full drop-in replacement for
-`caffeinate`, not just a clamshell-only patch — including `-w pid` and
-wrapping a command, the same way `caffeinate` does.
-
-See [RESEARCH.md](RESEARCH.md) for the technical findings behind this —
-what's confirmed on Intel vs. Apple Silicon, how the virtual display
-mechanism behaves, and every current limitation. Read it before trusting
-this for anything important; it's more thorough than this README.
-
 ## Requirements
 
 - Apple Silicon Mac (M1 or later), macOS Ventura or later
@@ -42,7 +21,7 @@ Only actually tested on one machine so far (MacBook Pro 16", M5 Max, macOS
 26.5.2) — see RESEARCH.md's "Device support" note before assuming this is
 broadly confirmed across the M-series lineup.
 
-## Quick start
+## Installation
 
 Via Homebrew:
 
@@ -70,6 +49,27 @@ Run it before closing the lid. Ctrl-C (or the `--duration` timer elapsing,
 or a wrapped command exiting) releases the hold and lets normal sleep
 resume immediately. Full CLI usage, including the `caffeinate`-compatible
 `-d -i -m -s -u -w` flags: [cli/keepawake/README.md](cli/keepawake/README.md).
+
+## How it works
+
+`keepawake` creates a tiny, software-only virtual display via the private
+`CGVirtualDisplay` CoreGraphics API — the same mechanism apps like
+BetterDisplay use, no kext, no physical hardware. That's enough to satisfy
+whatever check gates clamshell sleep: with it running, the lid can be
+closed indefinitely and the Mac stays fully awake and working.
+
+The phantom display only defeats that hardware-enforced clamshell check —
+it does nothing about ordinary idle/display/disk sleep, which is a separate
+mechanism. So `keepawake` also runs `/usr/bin/caffeinate` internally
+(tied to its own lifetime via `-w`) to hold the same assertions plain
+`caffeinate` would. That makes it a full drop-in replacement for
+`caffeinate`, not just a clamshell-only patch — including `-w pid` and
+wrapping a command, the same way `caffeinate` does.
+
+See [RESEARCH.md](RESEARCH.md) for the technical findings behind this —
+what's confirmed on Intel vs. Apple Silicon, how the virtual display
+mechanism behaves, and every current limitation. Read it before trusting
+this for anything important; it's more thorough than this README.
 
 ## Known limitations
 
