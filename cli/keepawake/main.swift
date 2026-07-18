@@ -352,9 +352,10 @@ while candidatePixels >= minPixels {
     desc.maxPixelsWide = UInt32(w)
     desc.maxPixelsHigh = UInt32(h)
     desc.sizeInMillimeters = CGSize(width: w / 10, height: h / 10)
-    desc.productID = 0x1234
-    desc.vendorID = 0x3456
-    desc.serialNum = 0x0001
+    // Distinctive identity above 0xFFFF (bytes spell keep/awak/e).
+    desc.productID = 0x6177616B  // "awak"
+    desc.vendorID = 0x6B656570   // "keep"
+    desc.serialNum = 0x00000065  // "e"
     desc.terminationHandler = { _, _ in }
 
     let candidate = CGVirtualDisplay(descriptor: desc)
