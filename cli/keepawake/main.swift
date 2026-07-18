@@ -442,6 +442,32 @@ func displayReconfigured(_ display: CGDirectDisplayID,
 }
 
 phantomDisplayID = display.displayID
+
+// Wait for WindowServer to finish settling the phantom's insertion before the
+// first park. apply() returns before the arrangement stabilizes, and parking
+// mid-insertion computes the neighbor against a transient layout, which
+// mis-aligns the result. (The re-park path always runs post-settle, which is
+// why a later display change looks correct but the initial placement doesn't.)
+// Poll until the layout is stable across two reads, or a short timeout, then
+// park against the settled arrangement.
+func layoutSignature() -> String {
+    var count: UInt32 = 0
+    CGGetActiveDisplayList(0, nil, &count)
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return "" }
+    return ids.map { id -> String in
+        let b = CGDisplayBounds(id)
+        return "\(id):\(Int(b.origin.x)),\(Int(b.origin.y)),\(Int(b.width)),\(Int(b.height))"
+    }.sorted().joined(separator: "|")
+}
+var previousLayout = ""
+for _ in 0..<50 {  // up to ~1s; breaks as soon as the layout stops changing
+    let current = layoutSignature()
+    if !current.isEmpty, current == previousLayout { break }
+    previousLayout = current
+    Thread.sleep(forTimeInterval: 0.02)
+}
+
 parkPhantom()
 CGDisplayRegisterReconfigurationCallback(displayReconfigured, nil)
 
