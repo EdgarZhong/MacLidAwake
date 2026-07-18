@@ -120,6 +120,20 @@ else
   fail "--bogus should fail"
 fi
 
+"$KEEPAWAKE" --thermal bogus >/tmp/kw_thermal_bad.log 2>&1
+if [ $? -ne 0 ] && grep -qi "none, serious, or critical" /tmp/kw_thermal_bad.log; then
+  pass "--thermal rejects an invalid level"
+else
+  fail "--thermal bogus should fail with a level error"
+fi
+
+"$KEEPAWAKE" --thermal >/tmp/kw_thermal_missing.log 2>&1
+if [ $? -ne 0 ]; then
+  pass "--thermal rejects a missing level"
+else
+  fail "--thermal with no value should fail"
+fi
+
 ARCH=$(uname -m)
 if [ "$ARCH" == "x86_64" ]; then
   "$KEEPAWAKE" >/tmp/kw_intel.log 2>&1
@@ -210,6 +224,20 @@ if pgrep -f "caffeinate .* -w $KWCA" >/dev/null; then
   fail "internal caffeinate still running after keepawake stopped (SIGINT)"
 else
   pass "internal caffeinate exits when keepawake is stopped (SIGINT)"
+fi
+
+# The running status line advertises the thermal-cutoff level (default critical).
+if grep -q "thermal-cutoff critical" /tmp/kw_caffeinate_default.log; then
+  pass "default run reports thermal-cutoff critical in its status line"
+else
+  fail "expected 'thermal-cutoff critical' in the default status line"
+fi
+
+"$KEEPAWAKE" --force --thermal serious -t 1 >/tmp/kw_thermal_serious.log 2>&1
+if grep -q "thermal-cutoff serious" /tmp/kw_thermal_serious.log; then
+  pass "--thermal serious is reflected in the status line"
+else
+  fail "expected 'thermal-cutoff serious' in the status line with --thermal serious"
 fi
 
 "$KEEPAWAKE" --force -d -s >/tmp/kw_caffeinate_flags.log 2>&1 &

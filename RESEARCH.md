@@ -84,8 +84,12 @@ code comments in `main.swift`, next to the logic they justify.)
   confirmed.
 - Power draw with the lid closed and no real display is unmeasured. Clamshell
   sleep exists partly for thermal and battery protection, so this is worth ruling
-  out as a bag-overheating risk. The CLI's battery pre-flight warning covers it
-  in the meantime.
+  out as a bag-overheating risk. In the meantime the CLI warns on battery (and
+  suggests Low Power Mode when it's off), and releases the hold under thermal
+  pressure while the lid is closed (`--thermal none|serious|critical`, default
+  `critical`; lid-gated because with the lid open thermal is the OS's job). Note
+  `.serious` is reached by ordinary heavy CPU/GPU work, which is why it's opt-in
+  rather than the default cutoff.
 - Initial parking is verified live (parked exactly, no real display displaced),
   but re-parking triggered by a physical monitor hotplug uses the same path via
   a reconfiguration callback and hasn't been confirmed on real hardware. Worst

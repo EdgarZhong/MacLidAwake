@@ -28,6 +28,7 @@ Or build from source (drop the leading `./` below if you installed via Homebrew)
 ./keepawake -disu              # hold every caffeinate assertion too
 ./keepawake -- ./backup.sh     # run a command, stop when it exits
 ./keepawake -w 1234            # stop when pid 1234 exits
+./keepawake --thermal serious  # release earlier under thermal pressure (lid closed)
 ```
 
 Run it before closing the lid. Ctrl-C, the `--duration` timer, or a wrapped
@@ -41,11 +42,18 @@ assertion flags (`-d -i -m -s -u`), `-t` duration, `-w pid`, and trailing-comman
 wrapping all match `caffeinate`'s semantics. See `-h`/`--help` for the full flag
 reference.
 
+Under thermal pressure keepawake releases the hold and exits, but only while the
+lid is closed (with the lid open, thermal management is left to the OS). Choose
+the threshold with `--thermal none|serious|critical` (default `critical`).
+`serious` fires eagerly, since normal heavy CPU/GPU work reaches it, so it's
+opt-in rather than the default.
+
 ## Pre-flight warnings
 
 - **Battery power.** Closing the lid for extended periods on battery bypasses the
   thermal and battery protections clamshell sleep normally provides (e.g. in an
-  enclosed bag).
+  enclosed bag). When Low Power Mode is off, the warning also suggests enabling
+  it (System Settings > Battery) to cut heat and drain during a closed-lid run.
 - **Sidecar connected.** Universal Control has been observed routing the cursor
   onto a nearby Mac through the virtual display. Disconnect Sidecar / disable
   Universal Control first, or expect this.

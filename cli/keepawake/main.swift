@@ -5,9 +5,16 @@
 
 import Cocoa
 import CoreGraphics
+import IOKit
 import IOKit.ps
 
 let toolName = "keepawake"
+
+// How aggressively to release the sleep hold under thermal pressure. Only ever
+// acts while the lid is closed (see the thermal safety net below); with the lid
+// open, thermal management is the OS's job. `.serious` fires eagerly and is
+// opt-in via --thermal; `.critical` is the default backstop; `.none` disables it.
+enum ThermalCutoff: String { case none, serious, critical }
 
 func printUsage() {
     print("""
@@ -41,6 +48,13 @@ func printUsage() {
       -f, --force                Skip safety warnings (battery power, Sidecar
                                   connected, non-Apple-Silicon Mac, etc.) and
                                   run anyway.
+      --thermal <level>          When to release the hold under thermal
+                                  pressure, one of: none, serious, critical.
+                                  Default: critical. Only acts while the lid is
+                                  closed; with the lid open, thermal management
+                                  is left to the OS. `serious` fires eagerly
+                                  (normal heavy CPU/GPU work reaches it), so
+                                  it's opt-in.
       -h, --help                 Show this help and exit.
 
     With no -t/-w/command given, runs until Ctrl-C, which stops it and lets
@@ -67,6 +81,7 @@ var assertDisk = false
 var assertSystem = false
 var assertUser = false
 var waitPid: pid_t?
+var thermalCutoff: ThermalCutoff = .critical
 var commandArgs: [String] = []
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -91,6 +106,12 @@ while i < args.count {
             die("-w requires a positive process ID")
         }
         waitPid = pid
+    case "--thermal":
+        i += 1
+        guard i < args.count, let level = ThermalCutoff(rawValue: args[i]) else {
+            die("--thermal requires a level: none, serious, or critical")
+        }
+        thermalCutoff = level
     case "--":
         // Everything after `--` is the wrapped command, verbatim, including
         // tokens that look like our own flags.
@@ -241,12 +262,20 @@ func isOnACPower() -> Bool {
 }
 
 if !isOnACPower() && !force {
-    warn("""
+    var batteryWarning = """
     running on battery power. Closing the lid for extended periods on \
     battery bypasses the thermal/battery protections clamshell sleep \
-    normally provides (e.g. in an enclosed bag). Re-run with --force to \
-    suppress this warning, or plug in first.
-    """)
+    normally provides (e.g. in an enclosed bag).
+    """
+    // Only nag about Low Power Mode when it's actually off (public API, no sudo
+    // to read; enabling it does need sudo or the Settings toggle, so we suggest
+    // rather than set it).
+    if !ProcessInfo.processInfo.isLowPowerModeEnabled {
+        batteryWarning += " Enabling Low Power Mode (System Settings > Battery)"
+            + " cuts heat and drain and is worth doing before a closed-lid run."
+    }
+    batteryWarning += " Re-run with --force to suppress this warning, or plug in first."
+    warn(batteryWarning)
 }
 
 func connectedDisplayTypeLines() -> [String] {
@@ -404,6 +433,10 @@ func displayReconfigured(_ display: CGDirectDisplayID,
                          _ flags: CGDisplayChangeSummaryFlags,
                          _ userInfo: UnsafeMutableRawPointer?) {
     if flags.contains(.beginConfigurationFlag) { return }
+    // The lid closing surfaces here as the built-in display deactivating. That's
+    // the one thermal case the thermal-change notification misses (the thermal
+    // state doesn't change, only the lid does), so re-check the cutoff here too.
+    evaluateThermalCutoff()
     if display == phantomDisplayID { return }
     DispatchQueue.main.async { parkPhantom() }
 }
@@ -498,22 +531,61 @@ if !commandArgs.isEmpty {
 } else {
     statusSuffix = "Ctrl-C to stop"
 }
-print("\(toolName): running (virtual display \(Int(targetWidth))x\(Int(targetHeight)), caffeinate -\(caffeinateFlags), \(statusSuffix))")
+print("\(toolName): running (virtual display \(Int(targetWidth))x\(Int(targetHeight)), caffeinate -\(caffeinateFlags), thermal-cutoff \(thermalCutoff.rawValue), \(statusSuffix))")
 fflush(stdout)
 
-// ---- Thermal safety net ----
-// Release the hold voluntarily under sustained critical thermal pressure,
-// rather than relying solely on the hardware/firmware emergency path.
-NotificationCenter.default.addObserver(
-    forName: ProcessInfo.thermalStateDidChangeNotification,
-    object: nil, queue: .main
-) { _ in
-    if ProcessInfo.processInfo.thermalState == .critical {
-        FileHandle.standardError.write(
-            "\(toolName): thermal state critical, releasing the sleep hold\n".data(using: .utf8)!)
-        teardown()
-        exit(0)
+// True only when we can confirm the lid is open. AppleClamshellState on
+// IOPMrootDomain is the physical lid sensor (true = closed), and more stable
+// than the AppleClamshellCausesSleep property RESEARCH.md warns about. If we
+// can't read it, return false so the caller errs toward acting.
+@Sendable
+func isLidConfirmedOpen() -> Bool {
+    let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+    guard service != 0 else { return false }
+    defer { IOObjectRelease(service) }
+    guard let closed = IORegistryEntryCreateCFProperty(
+        service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0
+    )?.takeRetainedValue() as? Bool else {
+        return false
     }
+    return !closed
+}
+
+// ---- Thermal safety net (lid-gated) ----
+// Release the hold under thermal pressure, but only while the lid is closed:
+// with the lid open, thermal management is the OS's job and it will emergency-
+// sleep itself if it must, so exiting there would just kill the session for no
+// benefit. Suppress only when the lid is *confirmed* open, so an unreadable lid
+// state still errs toward releasing. The threshold comes from --thermal.
+//
+// Level-triggered, not edge-triggered: this re-decides from the current thermal
+// + lid state on every call, and is driven from three places — the thermal-state
+// notification, the display-reconfiguration callback (the lid closing shows up
+// there as the built-in deactivating), and once at startup. That covers the
+// go-critical-then-close-the-lid ordering, where the thermal state itself never
+// changes, so the notification alone would miss it.
+func evaluateThermalCutoff() {
+    let state = ProcessInfo.processInfo.thermalState
+    let hit: Bool
+    switch thermalCutoff {
+    case .none: hit = false
+    case .serious: hit = (state == .serious || state == .critical)
+    case .critical: hit = (state == .critical)
+    }
+    guard hit, !isLidConfirmedOpen() else { return }
+    let label = state == .critical ? "critical" : "serious"
+    FileHandle.standardError.write(
+        "\(toolName): thermal state \(label) with lid closed, releasing the sleep hold and exiting\n".data(using: .utf8)!)
+    teardown()
+    exit(0)
+}
+
+if thermalCutoff != .none {
+    NotificationCenter.default.addObserver(
+        forName: ProcessInfo.thermalStateDidChangeNotification,
+        object: nil, queue: .main
+    ) { _ in evaluateThermalCutoff() }
+    evaluateThermalCutoff()  // in case we launched already hot with the lid shut
 }
 
 // ---- Clean shutdown on Ctrl-C / termination ----
