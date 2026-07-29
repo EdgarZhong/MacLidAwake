@@ -15,11 +15,8 @@ project exists to avoid.
 ## Requirements
 
 - Apple Silicon Mac (M1 or later), macOS Ventura or later
-- No external display
 
-Tested on one machine so far (MacBook Pro 16", M5 Max, macOS 26.5.2). See
-[RESEARCH.md](RESEARCH.md)'s device-support note before assuming broad M-series
-coverage.
+Tested on one machine so far (MacBook Pro 16", M5 Max, macOS 26.5.2); Assumed to work across all M-series devices. 
 
 ## Installation
 
@@ -53,11 +50,9 @@ CLI usage, including the `caffeinate`-compatible `-d -i -m -s -u -w` flags:
 ## How it works
 
 keepawake creates a tiny software-only virtual display via the private
-`CGVirtualDisplay` CoreGraphics API, the same mechanism apps like BetterDisplay
-use. That alone satisfies the check gating clamshell sleep, so the lid can stay
-closed indefinitely while the Mac keeps working.
+`CGVirtualDisplay` CoreGraphics API. This registers as an external display, preventing automatic sleep in clamshell even when no display is connected. 
 
-The virtual display only handles the hardware clamshell check. For ordinary idle,
+The virtual display only handles the clamshell check. For ordinary idle,
 display, and disk sleep, keepawake also runs `/usr/bin/caffeinate` internally
 (tied to its own lifetime via `-w`), holding the same assertions plain
 `caffeinate` would. That makes it a drop-in `caffeinate` replacement, not just a
@@ -68,22 +63,12 @@ findings, and every known limitation. It's more thorough than this README.
 
 ## Known limitations
 
-- **Cursor and window drift.** The virtual display is parked at the bottom-right
-  outer edge of your arrangement so it doesn't displace your real displays, but
-  your cursor can still reach it there. With Universal Control enabled it can
-  continue from there onto a nearby Mac/iPad; disable Universal Control to rule
-  that out. The CLI warns about this every time it starts.
-- **Reduced resolution.** `CGVirtualDisplay` caps out around 1.65 million total
-  pixels (an unaccelerated software framebuffer, not a real GPU output), so the
-  phantom display is scaled down from your real resolution rather than matched
-  pixel-for-pixel. This also rules out screen mirroring, since a Mac's native
-  resolution sits well above the cap.
-- **Not App Store distributable.** It uses private, undocumented API. Fine for
-  direct distribution; the Mac App Store would reject it.
-- **No fallback if Apple changes the API.** `CGVirtualDisplay` is unsupported and
-  can change or vanish in any release. keepawake checks for it at startup and
-  exits with a clear message rather than crashing, but there's no other recourse.
-- **Some CPU cost.** Holding the display open adds a small, ongoing amount of
+- **Cursor and window drift:** The virtual display is parked at the far right
+  edge of your arrangement so it doesn't displace your real displays, but
+  your cursor can still reach it. 
+- **Application Resizing on large MacBooks:** 16-inch MacBooks have physical displays that exceed the `CGVirtualDisplay`
+  pixel cap (~1.65 million). This can cause minor resizing on those devices. 
+- **Ongoing CPU cost.** Holding the display open adds a small, ongoing amount of
   WindowServer CPU usage.
 
 ## Testing
@@ -96,8 +81,7 @@ Covers build, argument parsing, pre-flight warnings, virtual-display
 creation/sizing/naming, the clamshell-sleep property flip, clean shutdown, the
 `--duration` auto-stop, single-instance locking, the internal `caffeinate`
 holder, `-w pid` waiting, and command wrapping. The one thing it can't cover is a
-real physical lid close; there's no software way to simulate that, so it stays a
-manual test (protocol in RESEARCH.md).
+real physical lid close, which remains a manual test. 
 
 ## License
 
