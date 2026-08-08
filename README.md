@@ -1,8 +1,7 @@
 # keepawake
 
 Keep an Apple Silicon Mac awake with the lid closed: no external display, no
-dummy HDMI plug, no kernel extension. Requires Apple Silicon (M1 or later) and
-macOS Ventura or later.
+dummy HDMI plug, no kernel extension.
 
 ## Install
 
@@ -11,7 +10,8 @@ brew tap ecc521/keepawake
 brew install ecc521/keepawake/keepawake
 ```
 
-Or build from source with `cd cli/keepawake && ./build.sh`.
+Or build from source with `cd cli/keepawake && ./build.sh`. Requires Apple
+Silicon (M1 or later) and macOS Ventura or later.
 
 ## Use
 
@@ -21,10 +21,10 @@ keepawake -t 3600            # run for 1 hour, then stop automatically
 keepawake -- ./backup.sh     # run a command, stop when it exits
 ```
 
-Run it before closing the lid. Ctrl-C, the `-t` timer, or a wrapped command
-exiting all release the hold and let normal sleep resume. keepawake is a drop-in
-`caffeinate` replacement — the `-d -i -m -s -u -w` flags match — so ordinary
-idle, display, and disk sleep are covered too. Full CLI reference:
+Run it before closing the lid. Whenever keepawake stops, the hold is released
+and normal sleep resumes. keepawake is a drop-in `caffeinate` replacement — the
+`-d -i -m -s -u -w` flags match — so ordinary idle, display, and disk sleep are
+covered too. Full CLI reference:
 [cli/keepawake/README.md](cli/keepawake/README.md).
 
 ## The problem
