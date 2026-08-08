@@ -6,3 +6,6 @@ experiments/phantom-display/phantom-display
 .build/
 *.o
 *.swiftmodule
+
+# macOS
+.DS_Store
