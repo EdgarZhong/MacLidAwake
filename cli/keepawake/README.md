@@ -25,8 +25,7 @@ keepawake --thermal serious  # release earlier under thermal pressure
 keepawake --battery 20       # release at 20% battery; default 5
 ```
 
-Run it before closing the lid. Whenever keepawake stops, the hold is released
-and normal sleep resumes.
+Whenever keepawake stops, the hold is released and normal sleep resumes.
 
 keepawake is a drop-in `caffeinate` replacement, not just a clamshell patch: the
 phantom display defeats hardware-enforced clamshell sleep, and an internal

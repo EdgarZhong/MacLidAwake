@@ -21,8 +21,8 @@ keepawake -t 3600            # run for 1 hour, then stop automatically
 keepawake -- ./backup.sh     # run a command, stop when it exits
 ```
 
-Run it before closing the lid. Whenever keepawake stops, the hold is released
-and normal sleep resumes. keepawake is a drop-in `caffeinate` replacement — the
+Whenever keepawake stops, the hold is released and normal sleep resumes.
+keepawake is a drop-in `caffeinate` replacement — the
 `-d -i -m -s -u -w` flags match — so ordinary idle, display, and disk sleep are
 covered too. Full CLI reference:
 [cli/keepawake/README.md](cli/keepawake/README.md).
