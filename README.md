@@ -1,29 +1,19 @@
 # keepawake
 
 Keep an Apple Silicon Mac awake with the lid closed: no external display, no
-dummy HDMI plug, no kernel extension.
+dummy HDMI plug, no kernel extension. Requires Apple Silicon (M1 or later) and
+macOS Ventura or later.
 
-## Requirements
-
-- Apple Silicon Mac (M1 or later), macOS Ventura or later.
-
-## Installation
-
-Via Homebrew:
+## Install
 
 ```
 brew tap ecc521/keepawake
 brew install ecc521/keepawake/keepawake
 ```
 
-Or build from source:
+Or build from source with `cd cli/keepawake && ./build.sh`.
 
-```
-cd cli/keepawake
-./build.sh
-```
-
-Then:
+## Use
 
 ```
 keepawake                    # run until Ctrl-C
@@ -31,48 +21,42 @@ keepawake -t 3600            # run for 1 hour, then stop automatically
 keepawake -- ./backup.sh     # run a command, stop when it exits
 ```
 
-Keepawake uses the same settings as caffeinate. Ctrl-C, the `--duration` timer elapsing, or a
-wrapped command exiting all release the hold and let normal sleep resume. Full
-CLI usage, including the `caffeinate`-compatible `-d -i -m -s -u -w` flags: [cli/keepawake/README.md](cli/keepawake/README.md).
-
+Run it before closing the lid. Ctrl-C, the `-t` timer, or a wrapped command
+exiting all release the hold and let normal sleep resume. keepawake is a drop-in
+`caffeinate` replacement — the `-d -i -m -s -u -w` flags match — so ordinary
+idle, display, and disk sleep are covered too. Full CLI reference:
+[cli/keepawake/README.md](cli/keepawake/README.md).
 
 ## The problem
 
-Starting with macOS Ventura, Apple Silicon Macs enforce clamshell sleep in
-hardware: closing the lid sleeps the machine unless a real external display is
-attached. `caffeinate` and the public `IOPMAssertion` APIs don't touch this. The
-only officially supported workaround is a real external monitor or a physical
-dummy HDMI/DisplayPort plug, which is exactly the hardware dependency this
-project exists to avoid.
+Since Ventura, Apple Silicon Macs enforce clamshell sleep in hardware: closing
+the lid sleeps the machine unless a real external display is attached.
+`caffeinate` and the public `IOPMAssertion` APIs don't touch this. The only
+supported workaround is a real monitor or a dummy HDMI/DisplayPort plug —
+exactly the hardware dependency this project exists to avoid.
 
 ## How it works
 
 keepawake creates a tiny software-only virtual display via the private
-`CGVirtualDisplay` CoreGraphics API. This registers as an external display, preventing automatic sleep in clamshell even when no display is connected. 
-
-The virtual display only handles the clamshell check. For ordinary idle,
-display, and disk sleep, keepawake also runs `/usr/bin/caffeinate` internally
-(tied to its own lifetime via `-w`), holding the same assertions plain
-`caffeinate` would. That makes it a drop-in `caffeinate` replacement, not just a
-clamshell patch.
-
-See [RESEARCH.md](RESEARCH.md) for the mechanism, the Intel vs. Apple Silicon
-findings, and every known limitation. It's more thorough than this README.
+`CGVirtualDisplay` CoreGraphics API. It registers as an external display, which
+satisfies the clamshell check even with nothing plugged in. That covers
+lid-closed sleep only, so keepawake also runs `/usr/bin/caffeinate` internally
+(tied to its own lifetime via `-w`) to hold the ordinary sleep assertions.
 
 ## Known limitations
 
-- **Cursor and window drift:** The virtual display is parked at the far right
-  edge of your arrangement so it doesn't displace your real displays, but your
-  cursor can still reach it. If Universal Control is enabled, the cursor has
-  been observed to travel through the phantom onto a nearby Mac or iPad, taking
-  input focus off this machine entirely. Disable Universal Control if you want
-  to rule that out.
-- **Application resizing on large MacBooks:** 16-inch MacBooks have physical
-  displays that exceed the `CGVirtualDisplay` pixel cap, so the phantom
-  registers slightly smaller than the real screen. This can cause minor resizing
-  on those devices. 
-- **Ongoing CPU cost.** Holding the display open adds a small, ongoing amount of
+- **Cursor drift.** The phantom is parked at the far-right edge of your
+  arrangement so it doesn't displace real displays, but your cursor can still
+  reach it. With Universal Control enabled it has been seen to travel onward
+  onto a nearby Mac or iPad, taking input focus off this machine.
+- **App resizing on 16" MacBooks.** Their native resolution exceeds the
+  `CGVirtualDisplay` pixel cap, so the phantom registers slightly smaller than
+  the real screen and windows may reflow on lid close.
+- **Ongoing CPU cost.** Holding the display open adds a small amount of
   WindowServer CPU usage.
+
+[RESEARCH.md](RESEARCH.md) covers the mechanism, the Intel vs. Apple Silicon
+findings, and every known limitation in full.
 
 ## Testing
 
@@ -80,11 +64,8 @@ findings, and every known limitation. It's more thorough than this README.
 ./tests/run_tests.sh
 ```
 
-Covers build, argument parsing, quiet startup, the battery-cutoff gating,
-virtual-display creation/sizing/naming, the clamshell-sleep property flip, clean shutdown, the
-`--duration` auto-stop, single-instance locking, the internal `caffeinate`
-holder, `-w pid` waiting, and command wrapping. The one thing it can't cover is a
-real physical lid close, which remains a manual test. 
+Covers everything up to the one thing it can't: a real physical lid close, which
+remains a manual test.
 
 ## License
 
