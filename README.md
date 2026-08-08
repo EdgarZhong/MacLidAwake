@@ -3,20 +3,9 @@
 Keep an Apple Silicon Mac awake with the lid closed: no external display, no
 dummy HDMI plug, no kernel extension.
 
-## The problem
-
-Starting with macOS Ventura, Apple Silicon Macs enforce clamshell sleep in
-hardware: closing the lid sleeps the machine unless a real external display is
-attached. `caffeinate` and the public `IOPMAssertion` APIs don't touch this. The
-only officially supported workaround is a real external monitor or a physical
-dummy HDMI/DisplayPort plug, which is exactly the hardware dependency this
-project exists to avoid.
-
 ## Requirements
 
-- Apple Silicon Mac (M1 or later), macOS Ventura or later
-
-Tested on one machine so far (MacBook Pro 16", M5 Max, macOS 26.5.2); Assumed to work across all M-series devices. 
+- Apple Silicon Mac (M1 or later), macOS Ventura or later.
 
 ## Installation
 
@@ -46,6 +35,16 @@ Run it before closing the lid. Ctrl-C, the `--duration` timer elapsing, or a
 wrapped command exiting all release the hold and let normal sleep resume. Full
 CLI usage, including the `caffeinate`-compatible `-d -i -m -s -u -w` flags:
 [cli/keepawake/README.md](cli/keepawake/README.md).
+
+
+## The problem
+
+Starting with macOS Ventura, Apple Silicon Macs enforce clamshell sleep in
+hardware: closing the lid sleeps the machine unless a real external display is
+attached. `caffeinate` and the public `IOPMAssertion` APIs don't touch this. The
+only officially supported workaround is a real external monitor or a physical
+dummy HDMI/DisplayPort plug, which is exactly the hardware dependency this
+project exists to avoid.
 
 ## How it works
 
