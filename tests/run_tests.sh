@@ -9,7 +9,7 @@
 #
 # What this CANNOT verify: whether the machine actually stays awake through
 # a real physical lid close. There is no software path to simulate
-# AppleClamshellState; that remains a manual test (see RESEARCH.md).
+# AppleClamshellState; that remains a manual test (see the closing note below).
 #
 # Tests that assume a clean single-display baseline are skipped if a real
 # external display is already attached.
@@ -207,7 +207,7 @@ fi
 # The sections below (caffeinate integration, command wrapping, -w) don't
 # depend on a single-display baseline or on the phantom display actually
 # registering with WindowServer; on Intel, apply() reports success even
-# though nothing really registers (see RESEARCH.md), so these still exercise
+# though nothing really registers, so these still exercise
 # real code paths there. Only the "Virtual display creation" and
 # clamshell-property assertions further down are genuinely
 # Apple-Silicon/clean-baseline-dependent.
@@ -368,7 +368,7 @@ fi
 
 "$KEEPAWAKE" -w 1 -- echo hi >/tmp/kw_mutex_w.log 2>&1
 if [ $? -ne 0 ] && grep -q "can't be combined with a wrapped command" /tmp/kw_mutex_w.log; then
-  pass "-w and a wrapped command are rejected together (deliberately not matching caffeinate's silent-ignore here; see RESEARCH.md)"
+  pass "-w and a wrapped command are rejected together (deliberately not matching caffeinate's silent-ignore here)"
 else
   fail "expected a mutual-exclusivity error for -w + wrapped command"
 fi
@@ -515,10 +515,10 @@ print('yes' if phantom_px >= min(main_px, 1_400_000) else 'no')
     fi
 
     # keepawake parks the phantom at the far-right outer edge, bottom-aligned to
-    # its neighbor (see RESEARCH.md; positioning works, it just clamps to a
-    # contiguous edge). On a single-display machine the neighbor is the main
-    # display, so the phantom's left edge should sit exactly at the main
-    # display's right edge. Assert that.
+    # its neighbor (macOS keeps arrangements gap-free, so the origin request
+    # clamps to a contiguous edge). On a single-display machine the neighbor
+    # is the main display, so the phantom's left edge should sit exactly at the
+    # main display's right edge. Assert that.
     ADJACENT=$(python3 -c "
 main_x1 = $MAIN_X + $MAIN_W
 print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
@@ -624,7 +624,18 @@ section "Known not automatable"
 echo "  Confirming the machine actually stays awake through a REAL physical"
 echo "  lid close is not covered here; there is no software path to"
 echo "  simulate AppleClamshellState. This suite validates every mechanism"
-echo "  up to that point. See RESEARCH.md's \"Verifying it yourself\" section."
+echo "  up to that point."
+echo
+echo "  To check it by hand, run this before and after a deliberate lid close"
+echo "  and reopen:"
+echo
+echo "    pmset -g log | grep -i clamshell | tail -5"
+echo
+echo "  That log is the ground truth. Don't substitute an instantaneous"
+echo "  \`ioreg -r -k AppleClamshellCausesSleep\` read: it has reported No on a"
+echo "  machine that in fact sleeps on every real lid close."
+echo "  experiments/clamshell-watch.sh polls the same properties live if you'd"
+echo "  rather watch than check the log afterward."
 
 section "Summary"
 echo "  $PASS passed, $FAIL failed, $SKIP skipped"

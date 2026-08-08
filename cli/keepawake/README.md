@@ -1,8 +1,8 @@
 # keepawake
 
 Keep an Apple Silicon Mac awake with the lid closed: no external display, no
-dummy HDMI plug, no kext. See `../../RESEARCH.md` for the technical findings and
-known limitations.
+dummy HDMI plug, no kext. See [the project README](../../README.md) for how it
+works and the known limitations.
 
 ## Install
 

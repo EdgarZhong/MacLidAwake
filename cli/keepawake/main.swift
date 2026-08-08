@@ -1,7 +1,7 @@
 // keepawake: prevent clamshell sleep with no external hardware, by holding open
 // a software-only virtual display via the private CGVirtualDisplay API.
-// See RESEARCH.md for why this works, and experiments/phantom-display for the
-// original proof of concept.
+// See the project README for why this works, and experiments/phantom-display
+// for the original proof of concept.
 
 import Cocoa
 import CoreGraphics
@@ -268,12 +268,17 @@ if !isRunningOnAppleSilicon() {
 // fail, `apply()` still returns true and a smaller mode registers instead.
 // The limit is undocumented and varies by release (measured ~1.66M on macOS 26,
 // ~1.76M on macOS 27), so this sits just under the lowest observed value and
-// may become unnecessary in a future release. See RESEARCH.md.
+// may become unnecessary in a future release. To re-measure it on a new
+// release, bisect the requested size and read back CGDisplayPixelsWide/High;
+// the request itself never reports the cap.
 //
 // Scale down from the main display's *point* size, never up. Matching the real
 // display as closely as possible minimizes window reflow when the lid closes
 // and the phantom becomes the main display; exceeding it would be far more
 // disruptive than falling slightly short, so the point size is a hard ceiling.
+// Whether the matching actually reduces reflow is unverified (it needs a
+// physical lid close with window frames recorded either side), so if it turns
+// out not to matter, this sizing logic can be dropped for a fixed size.
 //
 // An `NSScreen.screens.count` sanity check was tried and dropped: in this bare
 // CFRunLoop (non-NSApplication) context it never updated even when the display
@@ -320,8 +325,7 @@ guard display.apply(settings) else {
     failed to create the virtual display. CGVirtualDisplay may be \
     unavailable, or may behave differently, on this macOS version or device. \
     This is undocumented, unsupported API with no further fallback. If you \
-    can, please report this (device model + macOS version) so RESEARCH.md's \
-    device-support notes can be updated.
+    can, please open an issue with your device model and macOS version.
     """)
 }
 
@@ -332,9 +336,9 @@ guard display.apply(settings) else {
 // to the far-right outer edge instead, bottom-aligned to its neighbor, so the
 // real displays keep their positions. macOS keeps arrangements gap-free, so
 // CGConfigureDisplayOrigin can't float the phantom off in empty space; it clamps
-// the request to a contiguous spot. But it does honor which outer edge the
-// phantom attaches to, which is all we need. Verified on a 3-display setup: the
-// requested edge origin is applied exactly and no real display moves.
+// the request to a contiguous spot. It does generally honor which outer edge
+// the phantom attaches to, which is all we need, but the placement doesn't
+// always hold.
 
 var phantomDisplayID: CGDirectDisplayID?
 
@@ -515,8 +519,9 @@ fflush(stdout)
 
 // True only when we can confirm the lid is open. AppleClamshellState on
 // IOPMrootDomain is the physical lid sensor (true = closed), and more stable
-// than the AppleClamshellCausesSleep property RESEARCH.md warns about. If we
-// can't read it, return false so the caller errs toward acting.
+// than AppleClamshellCausesSleep, which has been seen to report `No` on a
+// machine that in fact sleeps on every real lid close. If we can't read it,
+// return false so the caller errs toward acting.
 @Sendable
 func isLidConfirmedOpen() -> Bool {
     let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
@@ -565,7 +570,7 @@ func evaluateThermalCutoff() {
 // sleeps at critical battery on its own and IOPMAssertion doesn't override
 // that, so this is usually redundant. It's here because keepawake already
 // defeats one class of hardware-enforced sleep, and whether the phantom display
-// also affects low-battery sleep is untested (see RESEARCH.md's known gaps).
+// also affects low-battery sleep is untested.
 
 @Sendable
 func isOnACPower() -> Bool {

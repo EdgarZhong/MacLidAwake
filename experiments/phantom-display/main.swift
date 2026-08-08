@@ -57,7 +57,7 @@ fflush(stdout)
 // arrangements gap-free, so it clamps this to an outer edge rather than letting
 // the display float off in the distance; the display does move to that edge,
 // though. The shipping CLI uses exactly this to park the phantom deliberately
-// (far-right, bottom-aligned; see RESEARCH.md). It doesn't stop the cursor
+// (far-right, bottom-aligned). It doesn't stop the cursor
 // reaching the phantom at the shared edge.
 let mainBounds = CGDisplayBounds(CGMainDisplayID())
 let parkOrigin = CGPoint(x: mainBounds.maxX + 5000, y: mainBounds.origin.y + 5000)
