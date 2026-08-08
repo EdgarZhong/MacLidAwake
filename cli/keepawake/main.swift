@@ -9,6 +9,8 @@ import IOKit
 import IOKit.ps
 
 let toolName = "keepawake"
+// Keep in sync with the git tag and the Homebrew formula's url/sha256.
+let toolVersion = "0.2.1"
 
 // How aggressively to release the sleep hold under thermal pressure. Only ever
 // acts while the lid is closed (see the thermal safety net below); with the lid
@@ -57,6 +59,7 @@ func printUsage() {
                                   to disable. Default: 5. Like --thermal, only
                                   acts on battery power with the lid closed;
                                   plugged in, or lid open, it never fires.
+      -v, --version              Show the version and exit.
       -h, --help                 Show this help and exit.
 
     With no -t/-w/command given, runs until Ctrl-C, which stops it and lets
@@ -96,6 +99,9 @@ while i < args.count {
     switch arg {
     case "-h", "--help":
         printUsage()
+        exit(0)
+    case "-v", "--version":
+        print("\(toolName) \(toolVersion)")
         exit(0)
     case "-t", "--duration":
         i += 1

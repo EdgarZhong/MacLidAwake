@@ -99,6 +99,34 @@ else
   fail "--help (exit=$HELP_EXIT)"
 fi
 
+for VFLAG in --version -v; do
+  "$KEEPAWAKE" "$VFLAG" >/tmp/kw_version.log 2>&1
+  V_EXIT=$?
+  # Must exit 0 and print "keepawake <semver>" -- nothing else, no side effects.
+  if [ "$V_EXIT" -eq 0 ] && grep -qE '^keepawake [0-9]+\.[0-9]+\.[0-9]+$' /tmp/kw_version.log; then
+    pass "$VFLAG prints the version and exits 0 ($(cat /tmp/kw_version.log))"
+  else
+    fail "$VFLAG (exit=$V_EXIT, output: $(cat /tmp/kw_version.log))"
+  fi
+done
+
+# The version the binary reports must match the newest git tag, or a release
+# will ship a binary that misreports itself.
+BIN_VERSION=$("$KEEPAWAKE" --version 2>/dev/null | awk '{print $2}')
+TAG_VERSION=$(git -C "$REPO_ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+NEWER=$(printf '%s\n%s\n' "$BIN_VERSION" "$TAG_VERSION" | sort -V | tail -1)
+if [ -z "$TAG_VERSION" ]; then
+  skip "version-matches-tag check (no git tags found)"
+elif [ "$BIN_VERSION" == "$TAG_VERSION" ]; then
+  pass "reported version matches the latest git tag ($BIN_VERSION)"
+elif [ "$NEWER" == "$BIN_VERSION" ]; then
+  # Normal between bumping toolVersion and cutting the tag. Only the reverse
+  # is a real problem: a binary that under-reports what it actually is.
+  pass "version $BIN_VERSION is ahead of latest tag v$TAG_VERSION (unreleased)"
+else
+  fail "binary reports $BIN_VERSION but tag v$TAG_VERSION is newer; toolVersion is stale"
+fi
+
 "$KEEPAWAKE" --duration abc >/tmp/kw_bad.log 2>&1
 if [ $? -ne 0 ] && grep -q "positive number" /tmp/kw_bad.log; then
   pass "--duration rejects non-numeric input"
