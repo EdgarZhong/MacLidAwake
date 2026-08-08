@@ -274,10 +274,16 @@ if !isRunningOnAppleSilicon() {
 // had registered (confirmed externally via `system_profiler`). `apply()`'s
 // return value is the only reliable in-process signal.
 
-guard let mainScreen = NSScreen.main else {
-    die("couldn't read the main display's resolution")
+// Probably reachable on headless devices, not tested. Fallback should be safe
+// either way: the phantom is likely unneeded there, but it's harmless.
+let fallbackPointSize = CGSize(width: 1440, height: 900)
+let pointSize: CGSize
+if let mainScreen = NSScreen.main {
+    pointSize = mainScreen.frame.size
+} else {
+    warn("couldn't read the main display's resolution; using \(Int(fallbackPointSize.width))x\(Int(fallbackPointSize.height)) for the virtual display")
+    pointSize = fallbackPointSize
 }
-let pointSize = mainScreen.frame.size
 let pixelCap = 1_654_400.0
 let requestedPixels = Double(pointSize.width) * Double(pointSize.height)
 let sizeScale = requestedPixels > pixelCap ? (pixelCap / requestedPixels).squareRoot() : 1.0
