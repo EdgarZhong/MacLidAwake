@@ -18,7 +18,7 @@ enum ThermalCutoff: String { case none, serious, critical }
 
 func printUsage() {
     print("""
-    Usage: \(toolName) [-disu] [-t seconds] [-w pid] [-f] [command [arg ...]]
+    Usage: \(toolName) [-disu] [-t seconds] [-w pid] [command [arg ...]]
 
     Prevents this Mac from sleeping (lid closed or open) without any
     external display or hardware. Holds open a tiny software-only virtual
@@ -45,9 +45,6 @@ func printUsage() {
                                   Use `--` before it if it starts with `-`.
 
     Other:
-      -f, --force                Skip safety warnings (battery power, Sidecar
-                                  connected, non-Apple-Silicon Mac, etc.) and
-                                  run anyway.
       --thermal <level>          When to release the hold under thermal
                                   pressure, one of: none, serious, critical.
                                   Default: critical. Only acts while the lid is
@@ -55,6 +52,11 @@ func printUsage() {
                                   is left to the OS. `serious` fires eagerly
                                   (normal heavy CPU/GPU work reaches it), so
                                   it's opt-in.
+      --battery <pct>            Release the hold and stop once the battery
+                                  falls to this percentage (1-99), or `none`
+                                  to disable. Default: 5. Like --thermal, only
+                                  acts on battery power with the lid closed;
+                                  plugged in, or lid open, it never fires.
       -h, --help                 Show this help and exit.
 
     With no -t/-w/command given, runs until Ctrl-C, which stops it and lets
@@ -74,7 +76,6 @@ func die(_ message: String) -> Never {
 // ---- Argument parsing ----
 
 var duration: Double?
-var force = false
 var assertDisplay = false
 var assertIdle = false
 var assertDisk = false
@@ -82,6 +83,10 @@ var assertSystem = false
 var assertUser = false
 var waitPid: pid_t?
 var thermalCutoff: ThermalCutoff = .critical
+// Percentage at or below which we release the hold, or nil to disable. Low by
+// default so it's a backstop against a machine running itself flat in a bag,
+// not a nag about being unplugged.
+var batteryCutoff: Int? = 5
 var commandArgs: [String] = []
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -92,8 +97,6 @@ while i < args.count {
     case "-h", "--help":
         printUsage()
         exit(0)
-    case "-f", "--force":
-        force = true
     case "-t", "--duration":
         i += 1
         guard i < args.count, let secs = Double(args[i]), secs > 0 else {
@@ -112,6 +115,18 @@ while i < args.count {
             die("--thermal requires a level: none, serious, or critical")
         }
         thermalCutoff = level
+    case "--battery":
+        i += 1
+        guard i < args.count else {
+            die("--battery requires a percentage between 1 and 99, or 'none'")
+        }
+        if args[i] == "none" {
+            batteryCutoff = nil
+        } else if let pct = Int(args[i]), pct >= 1, pct <= 99 {
+            batteryCutoff = pct
+        } else {
+            die("--battery requires a percentage between 1 and 99, or 'none'")
+        }
     case "--":
         // Everything after `--` is the wrapped command, verbatim, including
         // tokens that look like our own flags.
@@ -232,96 +247,27 @@ func isRunningOnAppleSilicon() -> Bool {
     #endif
 }
 
-if !isRunningOnAppleSilicon() && !force {
-    die("""
-    this Mac appears to be Intel-based. The hardware-level clamshell-sleep \
-    enforcement this tool works around was introduced with Apple Silicon \
-    (macOS Ventura+). On Intel, `sudo pmset -a disablesleep 1` already \
-    prevents clamshell sleep without any of this (confirmed by testing). \
-    Note that plain `caffeinate` does NOT: it only blocks idle/display \
-    sleep, never lid-closed sleep, on any Mac. --force will let you run \
-    this anyway, but on the one Intel Mac this has actually been tested on, \
-    the virtual display never registered at any size, so `pmset` is very \
-    likely your only real option here, not just the easier one.
-    """)
+if !isRunningOnAppleSilicon() {
+    die("this tool does not work on Intel Macs. Use `sudo pmset -a disablesleep 1` instead.")
 }
 
-func isOnACPower() -> Bool {
-    guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-          let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
-    else { return true }
-    for source in sources {
-        guard let description = IOPSGetPowerSourceDescription(snapshot, source)?
-            .takeUnretainedValue() as? [String: Any]
-        else { continue }
-        if let state = description[kIOPSPowerSourceStateKey as String] as? String {
-            return state == kIOPSACPowerValue as String
-        }
-    }
-    return true
-}
-
-if !isOnACPower() && !force {
-    var batteryWarning = """
-    running on battery power. Closing the lid for extended periods on \
-    battery bypasses the thermal/battery protections clamshell sleep \
-    normally provides (e.g. in an enclosed bag).
-    """
-    // Only nag about Low Power Mode when it's actually off (public API, no sudo
-    // to read; enabling it does need sudo or the Settings toggle, so we suggest
-    // rather than set it).
-    if !ProcessInfo.processInfo.isLowPowerModeEnabled {
-        batteryWarning += " Enabling Low Power Mode (System Settings > Battery)"
-            + " cuts heat and drain and is worth doing before a closed-lid run."
-    }
-    batteryWarning += " Re-run with --force to suppress this warning, or plug in first."
-    warn(batteryWarning)
-}
-
-func connectedDisplayTypeLines() -> [String] {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
-    task.arguments = ["SPDisplaysDataType"]
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    do {
-        try task.run()
-    } catch {
-        return []
-    }
-    task.waitUntilExit()
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let text = String(data: data, encoding: .utf8) ?? ""
-    return text.components(separatedBy: "\n").filter { $0.contains("Display Type:") }
-}
-
-if !force {
-    // Always shown, not just when Sidecar is connected right now: the phantom
-    // is parked at the bottom-right outer edge (see the parking logic below),
-    // but the cursor can still reach it there. Whether that then routes onto a
-    // nearby Mac depends on Universal Control being enabled, which isn't
-    // reliably detectable from here, so this warns unconditionally.
-    warn("""
-    this tool's virtual display is parked at the bottom-right outer edge of \
-    your screen arrangement, but your cursor can still reach it there. If \
-    Universal Control is enabled, this has been observed to route the cursor \
-    onward onto a nearby Mac/iPad. Disable Universal Control if you want to \
-    rule that out. Re-run with --force to suppress this warning.
-    """)
-    let displayTypes = connectedDisplayTypeLines()
-    if displayTypes.contains(where: { $0.contains("Sidecar") }) {
-        warn("a Sidecar display is currently connected, which increases the chance of the above actually happening.")
-    }
-}
+// Cursor drift onto the phantom (and onward to another Mac, if Universal
+// Control is on) is a permanent property of the mechanism rather than anything
+// detectable about a given run, so it lives in the README's known-limitations
+// section instead of being reprinted on every launch.
 
 // ---- Determine sizing and create the virtual display ----
 //
-// CGVirtualDisplay caps total pixels (a software-framebuffer limit) somewhere
-// between 1,662,600 and 1,684,900 on the one machine tested (see RESEARCH.md).
-// Start under it and halve down if `apply()` rejects a size, rather than
-// trusting that number on untested hardware. A request above the cap silently
-// registers a smaller resolution instead of failing, which is fine: any
-// registered display satisfies the clamshell check, right-sized or not.
+// CGVirtualDisplay silently caps total pixels: an over-cap request doesn't
+// fail, `apply()` still returns true and a smaller mode registers instead.
+// The limit is undocumented and varies by release (measured ~1.66M on macOS 26,
+// ~1.76M on macOS 27), so this sits just under the lowest observed value and
+// may become unnecessary in a future release. See RESEARCH.md.
+//
+// Scale down from the main display's *point* size, never up. Matching the real
+// display as closely as possible minimizes window reflow when the lid closes
+// and the phantom becomes the main display; exceeding it would be far more
+// disruptive than falling slightly short, so the point size is a hard ceiling.
 //
 // An `NSScreen.screens.count` sanity check was tried and dropped: in this bare
 // CFRunLoop (non-NSApplication) context it never updated even when the display
@@ -332,54 +278,37 @@ guard let mainScreen = NSScreen.main else {
     die("couldn't read the main display's resolution")
 }
 let pointSize = mainScreen.frame.size
+let pixelCap = 1_654_400.0
 let requestedPixels = Double(pointSize.width) * Double(pointSize.height)
-let startingPixelCap = 1_654_400.0
-let minPixels = 4.0 // 2x2, the smallest size confirmed to register as a real screen.
+let sizeScale = requestedPixels > pixelCap ? (pixelCap / requestedPixels).squareRoot() : 1.0
+let requestedWidth = (Double(pointSize.width) * sizeScale).rounded(.down)
+let requestedHeight = (Double(pointSize.height) * sizeScale).rounded(.down)
 
-var candidatePixels = min(requestedPixels, startingPixelCap)
-var display: CGVirtualDisplay?
-var targetWidth = 0.0
-var targetHeight = 0.0
+let desc = CGVirtualDisplayDescriptor()
+desc.setDispatchQueue(DispatchQueue.main)
+desc.name = "Keepawake Phantom Display"
+desc.maxPixelsWide = UInt32(requestedWidth)
+desc.maxPixelsHigh = UInt32(requestedHeight)
+desc.sizeInMillimeters = CGSize(width: requestedWidth / 10, height: requestedHeight / 10)
+// Distinctive identity above 0xFFFF (bytes spell keep/awak/e).
+desc.productID = 0x6177616B  // "awak"
+desc.vendorID = 0x6B656570   // "keep"
+desc.serialNum = 0x00000065  // "e"
+desc.terminationHandler = { _, _ in }
 
-while candidatePixels >= minPixels {
-    let scale = (candidatePixels / requestedPixels).squareRoot()
-    let w = (Double(pointSize.width) * scale).rounded(.down)
-    let h = (Double(pointSize.height) * scale).rounded(.down)
+let display = CGVirtualDisplay(descriptor: desc)
+let settings = CGVirtualDisplaySettings()
+settings.hiDPI = 0
+settings.modes = [CGVirtualDisplayMode(width: UInt(requestedWidth),
+                                       height: UInt(requestedHeight),
+                                       refreshRate: 60)]
 
-    let desc = CGVirtualDisplayDescriptor()
-    desc.setDispatchQueue(DispatchQueue.main)
-    desc.name = "Keepawake Phantom Display"
-    desc.maxPixelsWide = UInt32(w)
-    desc.maxPixelsHigh = UInt32(h)
-    desc.sizeInMillimeters = CGSize(width: w / 10, height: h / 10)
-    // Distinctive identity above 0xFFFF (bytes spell keep/awak/e).
-    desc.productID = 0x6177616B  // "awak"
-    desc.vendorID = 0x6B656570   // "keep"
-    desc.serialNum = 0x00000065  // "e"
-    desc.terminationHandler = { _, _ in }
-
-    let candidate = CGVirtualDisplay(descriptor: desc)
-    let settings = CGVirtualDisplaySettings()
-    settings.hiDPI = 0
-    settings.modes = [CGVirtualDisplayMode(width: UInt(w), height: UInt(h), refreshRate: 60)]
-
-    if candidate.apply(settings) {
-        display = candidate
-        targetWidth = w
-        targetHeight = h
-        break
-    }
-
-    candidatePixels /= 2
-}
-
-guard let display = display else {
+guard display.apply(settings) else {
     die("""
-    failed to create the virtual display at any size down to \
-    \(Int(minPixels)) pixels. CGVirtualDisplay may be unavailable, or may \
-    behave differently, on this macOS version or device. This is \
-    undocumented, unsupported API with no further fallback. If you can, \
-    please report this (device model + macOS version) so RESEARCH.md's \
+    failed to create the virtual display. CGVirtualDisplay may be \
+    unavailable, or may behave differently, on this macOS version or device. \
+    This is undocumented, unsupported API with no further fallback. If you \
+    can, please report this (device model + macOS version) so RESEARCH.md's \
     device-support notes can be updated.
     """)
 }
@@ -435,9 +364,9 @@ func displayReconfigured(_ display: CGDirectDisplayID,
                          _ userInfo: UnsafeMutableRawPointer?) {
     if flags.contains(.beginConfigurationFlag) { return }
     // The lid closing surfaces here as the built-in display deactivating. That's
-    // the one thermal case the thermal-change notification misses (the thermal
-    // state doesn't change, only the lid does), so re-check the cutoff here too.
-    evaluateThermalCutoff()
+    // the case both cutoff notifications miss (neither the thermal state nor the
+    // battery level changes, only the lid does), so re-check them here too.
+    evaluateSafetyCutoffs()
     if display == phantomDisplayID { return }
     DispatchQueue.main.async { parkPhantom() }
 }
@@ -548,6 +477,16 @@ if !commandArgs.isEmpty {
     wrappedProcess = proc
 }
 
+// Report what actually registered rather than what was asked for: macOS
+// silently downsizes an over-cap request, so the requested size would be a lie
+// on any display bigger than the cap. Reads 0 if nothing registered at all
+// (observed on Intel, where `apply()` reports success regardless).
+let registeredWidth = CGDisplayPixelsWide(display.displayID)
+let registeredHeight = CGDisplayPixelsHigh(display.displayID)
+let sizeLabel = registeredWidth > 0 && registeredHeight > 0
+    ? "virtual display \(registeredWidth)x\(registeredHeight)"
+    : "virtual display NOT registered (requested \(Int(requestedWidth))x\(Int(requestedHeight)))"
+
 let statusSuffix: String
 if !commandArgs.isEmpty {
     statusSuffix = "wrapping '\(commandArgs.joined(separator: " "))'"
@@ -558,7 +497,8 @@ if !commandArgs.isEmpty {
 } else {
     statusSuffix = "Ctrl-C to stop"
 }
-print("\(toolName): running (virtual display \(Int(targetWidth))x\(Int(targetHeight)), caffeinate -\(caffeinateFlags), thermal-cutoff \(thermalCutoff.rawValue), \(statusSuffix))")
+let batteryLabel = batteryCutoff.map { "\($0)%" } ?? "none"
+print("\(toolName): running (\(sizeLabel), caffeinate -\(caffeinateFlags), thermal-cutoff \(thermalCutoff.rawValue), battery-cutoff \(batteryLabel), \(statusSuffix))")
 fflush(stdout)
 
 // True only when we can confirm the lid is open. AppleClamshellState on
@@ -607,12 +547,85 @@ func evaluateThermalCutoff() {
     exit(0)
 }
 
+// ---- Low-battery cutoff (lid-gated, same shape as the thermal one) ----
+//
+// Keeps an unattended closed machine from running itself flat. macOS force-
+// sleeps at critical battery on its own and IOPMAssertion doesn't override
+// that, so this is usually redundant. It's here because keepawake already
+// defeats one class of hardware-enforced sleep, and whether the phantom display
+// also affects low-battery sleep is untested (see RESEARCH.md's known gaps).
+
+@Sendable
+func isOnACPower() -> Bool {
+    guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+          let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() as String?
+    else { return true }  // unreadable -> assume AC, i.e. don't fire
+    return type == (kIOPMACPowerKey as String)
+}
+
+// Whole-number battery percentage, or nil when there's no battery to read (a
+// desktop Mac, or an unreadable power source).
+@Sendable
+func batteryPercent() -> Int? {
+    guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+          let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
+    else { return nil }
+    for source in sources {
+        guard let description = IOPSGetPowerSourceDescription(snapshot, source)?
+            .takeUnretainedValue() as? [String: Any] else { continue }
+        if let current = description[kIOPSCurrentCapacityKey as String] as? Int,
+           let maximum = description[kIOPSMaxCapacityKey as String] as? Int,
+           maximum > 0 {
+            return Int((Double(current) / Double(maximum) * 100).rounded())
+        }
+    }
+    return nil
+}
+
+// Level-triggered like the thermal check: re-decides from current state on
+// every call rather than tracking a previous reading.
+func evaluateBatteryCutoff() {
+    guard let cutoff = batteryCutoff else { return }
+    // On AC the charge isn't a countdown, so a low reading means "charging",
+    // not "about to die". Nothing to protect against.
+    guard !isOnACPower(), let percent = batteryPercent(), percent <= cutoff else { return }
+    guard !isLidConfirmedOpen() else { return }
+    FileHandle.standardError.write(
+        "\(toolName): battery at \(percent)% with lid closed, releasing the sleep hold and exiting\n".data(using: .utf8)!)
+    teardown()
+    exit(0)
+}
+
+// Both nets share the lid-close trigger: closing the lid can satisfy the
+// gating condition without the thermal state or battery level itself changing,
+// so neither notification alone would catch that ordering.
+func evaluateSafetyCutoffs() {
+    evaluateThermalCutoff()
+    evaluateBatteryCutoff()
+}
+
 if thermalCutoff != .none {
     NotificationCenter.default.addObserver(
         forName: ProcessInfo.thermalStateDidChangeNotification,
         object: nil, queue: .main
     ) { _ in evaluateThermalCutoff() }
     evaluateThermalCutoff()  // in case we launched already hot with the lid shut
+}
+
+if batteryCutoff != nil {
+    // Event-driven, not polled. IOPSNotificationCreateRunLoopSource delivers a
+    // callback whenever percent-or-time remaining changes, and it's a
+    // CFRunLoopSource, which suits this process exactly: it drives a bare
+    // CFRunLoopRun() and so can schedule the source directly, with no
+    // dependency on the main GCD queue being pumped.
+    let batteryCallback: IOPowerSourceCallbackType = { _ in evaluateBatteryCutoff() }
+    if let source = IOPSNotificationCreateRunLoopSource(batteryCallback, nil)?.takeRetainedValue() {
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+    } else {
+        warn("couldn't register for battery-level notifications; the --battery cutoff is inactive for this run.")
+        batteryCutoff = nil
+    }
+    evaluateBatteryCutoff()  // in case we launched already low with the lid shut
 }
 
 // ---- Clean shutdown on Ctrl-C / termination ----

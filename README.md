@@ -62,10 +62,15 @@ findings, and every known limitation. It's more thorough than this README.
 ## Known limitations
 
 - **Cursor and window drift:** The virtual display is parked at the far right
-  edge of your arrangement so it doesn't displace your real displays, but
-  your cursor can still reach it. 
-- **Application Resizing on large MacBooks:** 16-inch MacBooks have physical displays that exceed the `CGVirtualDisplay`
-  pixel cap (~1.65 million). This can cause minor resizing on those devices. 
+  edge of your arrangement so it doesn't displace your real displays, but your
+  cursor can still reach it. If Universal Control is enabled, the cursor has
+  been observed to travel through the phantom onto a nearby Mac or iPad, taking
+  input focus off this machine entirely. Disable Universal Control if you want
+  to rule that out.
+- **Application resizing on large MacBooks:** 16-inch MacBooks have physical
+  displays that exceed the `CGVirtualDisplay` pixel cap, so the phantom
+  registers slightly smaller than the real screen. This can cause minor resizing
+  on those devices. 
 - **Ongoing CPU cost.** Holding the display open adds a small, ongoing amount of
   WindowServer CPU usage.
 
@@ -75,8 +80,8 @@ findings, and every known limitation. It's more thorough than this README.
 ./tests/run_tests.sh
 ```
 
-Covers build, argument parsing, pre-flight warnings, virtual-display
-creation/sizing/naming, the clamshell-sleep property flip, clean shutdown, the
+Covers build, argument parsing, quiet startup, the battery-cutoff gating,
+virtual-display creation/sizing/naming, the clamshell-sleep property flip, clean shutdown, the
 `--duration` auto-stop, single-instance locking, the internal `caffeinate`
 holder, `-w pid` waiting, and command wrapping. The one thing it can't cover is a
 real physical lid close, which remains a manual test. 

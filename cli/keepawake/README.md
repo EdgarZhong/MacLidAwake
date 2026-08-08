@@ -24,11 +24,11 @@ Or build from source (drop the leading `./` below if you installed via Homebrew)
 ```
 ./keepawake                    # run until Ctrl-C
 ./keepawake -t 3600            # run for 1 hour, then stop automatically
-./keepawake --force            # skip the pre-flight warnings below
 ./keepawake -disu              # hold every caffeinate assertion too
 ./keepawake -- ./backup.sh     # run a command, stop when it exits
 ./keepawake -w 1234            # stop when pid 1234 exits
 ./keepawake --thermal serious  # release earlier under thermal pressure (lid closed)
+./keepawake --battery 20       # release at 20% battery (lid closed); default 5
 ```
 
 Run it before closing the lid. Ctrl-C, the `--duration` timer, or a wrapped
@@ -42,40 +42,50 @@ assertion flags (`-d -i -m -s -u`), `-t` duration, `-w pid`, and trailing-comman
 wrapping all match `caffeinate`'s semantics. See `-h`/`--help` for the full flag
 reference.
 
-Under thermal pressure keepawake releases the hold and exits, but only while the
-lid is closed (with the lid open, thermal management is left to the OS). Choose
-the threshold with `--thermal none|serious|critical` (default `critical`).
-`serious` fires eagerly, since normal heavy CPU/GPU work reaches it, so it's
-opt-in rather than the default.
+## Cutoffs
 
-## Pre-flight warnings
+Two cutoffs stop keepawake and let normal sleep resume. Both only act with the
+lid closed — with it open, you're at the machine and don't need it deciding for
+you — and both are silent unless they fire.
 
-- **Battery power.** Closing the lid for extended periods on battery bypasses the
-  thermal and battery protections clamshell sleep normally provides (e.g. in an
-  enclosed bag). When Low Power Mode is off, the warning also suggests enabling
-  it (System Settings > Battery) to cut heat and drain during a closed-lid run.
-- **Sidecar connected.** Universal Control has been observed routing the cursor
-  onto a nearby Mac through the virtual display. Disconnect Sidecar / disable
-  Universal Control first, or expect this.
-- **Intel Macs.** The hardware clamshell enforcement this tool works around
-  doesn't exist pre-Apple-Silicon; `sudo pmset -a disablesleep 1` already
-  prevents clamshell sleep there. `--force` runs the tool on Intel anyway, but on
-  the one Intel Mac tested the virtual display never registered at any size (see
-  RESEARCH.md), so `pmset` may be the only option that works.
+- `--battery <pct>|none` (default `5`) — stop at that battery percentage, so an
+  unattended machine doesn't run itself flat. Ignored on AC power. Event-driven
+  via `IOPSNotificationCreateRunLoopSource`, not polled.
+- `--thermal none|serious|critical` (default `critical`) — stop under thermal
+  pressure, for when keepawake gets left running and the machine ends up
+  somewhere it can't shed heat. `serious` is reached by ordinary heavy CPU/GPU
+  work, so it's opt-in.
 
-All three can be skipped with `--force`.
+macOS handles both of these on its own; these cutoffs exist because keepawake is
+the reason the machine is awake in the first place.
+
+## Pre-flight check
+
+A normal run prints one status line and nothing else. There is one pre-flight
+check, and it's fatal: **keepawake does not work on Intel Macs and refuses to
+run there.** Use `sudo pmset -a disablesleep 1` instead, which already prevents
+clamshell sleep on Intel. See RESEARCH.md for the details.
 
 ## Known limitations
 
 See RESEARCH.md for full detail. Summary:
 
-- The virtual display is capped at ~1.65 million total pixels by
-  `CGVirtualDisplay` itself, so it's scaled down proportionally from your real
-  resolution and won't be pixel-for-pixel identical.
+- The virtual display is capped in total pixels by `CGVirtualDisplay` itself.
+  The limit is undocumented and varies by release (~1.66M on macOS 26, ~1.76M on
+  macOS 27), so keepawake scales down against a conservative fixed 1.6M and
+  never requests more than your display's point size. On larger displays the
+  phantom is therefore slightly smaller than the real screen and won't be
+  pixel-for-pixel identical. The status line reports the size that registered.
 - When the lid closes, the built-in panel deactivates and the virtual display
   briefly becomes the system's Main display (standard clamshell behavior). Apps
   may reflow or resize during this transition. Sizing the virtual display close
   to the real one minimizes this but doesn't guarantee zero disruption, and
   native-fullscreen apps haven't been exhaustively tested across it.
-- Universal Control is a known, unresolved hazard (see above).
+- **Universal Control is a known, unresolved hazard.** The phantom is parked at
+  the far-right outer edge, but the cursor can still reach it, and with
+  Universal Control enabled it has been observed travelling onward onto a nearby
+  Mac or iPad, taking input focus off this machine. Disable Universal Control to
+  rule that out. (Not warned about at runtime: it's a permanent property of the
+  mechanism, not something detectable per-run — Universal Control's state is
+  stored as an opaque hashed device graph with no readable on/off flag.)
 - Adds some ongoing WindowServer CPU overhead while running.

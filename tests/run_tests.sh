@@ -138,7 +138,7 @@ ARCH=$(uname -m)
 if [ "$ARCH" == "x86_64" ]; then
   "$KEEPAWAKE" >/tmp/kw_intel.log 2>&1
   if [ $? -ne 0 ] && grep -qi "intel" /tmp/kw_intel.log; then
-    pass "refuses to run on Intel without --force"
+    pass "refuses to run on Intel"
   else
     fail "expected a refusal message on Intel hardware"
   fi
@@ -146,57 +146,34 @@ else
   skip "Intel-refusal check (running on $ARCH, not Intel)"
 fi
 
-section "Pre-flight warnings"
+section "Startup output is quiet"
 
-# These warnings only fire without --force, and only after the Intel-arch
-# guard, which itself requires --force to get past on Intel (see the
-# "refuses to run on Intel without --force" check above). So on Intel,
-# without --force, the process dies at the arch guard before ever reaching
-# this code; there's no way to observe these warnings there without also
-# suppressing them via --force, which would defeat the point. Skip on Intel
-# rather than failing on an unreachable code path.
+# A clean run should print exactly one line: the status line. The battery and
+# cursor-drift warnings were deliberately removed (a permanent property of the
+# mechanism belongs in the README, not on every launch), so assert their
+# absence rather than their presence -- otherwise they could creep back in.
 if [ "$ARCH" == "x86_64" ]; then
-  skip "battery-power warning check (unreachable on Intel without --force, which also suppresses it)"
-  skip "cursor-drift warning check (unreachable on Intel without --force, which also suppresses it)"
-  skip "Sidecar-specific addendum check (unreachable on Intel without --force, which also suppresses it)"
+  skip "quiet-startup check (Intel dies at the arch guard before reaching this)"
 else
-  if pmset -g batt 2>/dev/null | head -1 | grep -q "Battery Power"; then
-    "$KEEPAWAKE" >/tmp/kw_battery_warn.log 2>&1 &
-    KWB=$!
-    disown
-    sleep 1
-    if grep -q "battery power" /tmp/kw_battery_warn.log; then
-      pass "battery-power warning shown when running on battery"
-    else
-      fail "expected battery-power warning not found"
-    fi
-    kill -INT "$KWB" 2>/dev/null
-    wait_for_exit "$KWB"
-  else
-    skip "battery-power warning check (currently on AC power)"
-  fi
-
-  "$KEEPAWAKE" >/tmp/kw_cursor_warn.log 2>&1 &
-  KWC=$!
+  "$KEEPAWAKE" >/tmp/kw_quiet.log 2>&1 &
+  KWQ=$!
   disown
-  sleep 1
-  if grep -qi "cursor can still reach" /tmp/kw_cursor_warn.log; then
-    pass "cursor-drift warning shown unconditionally (phantom is parked at the edge but still reachable)"
+  sleep 2
+  QUIET_LINES=$(grep -c . /tmp/kw_quiet.log)
+  if [ "$QUIET_LINES" -eq 1 ]; then
+    pass "clean run prints exactly one line of output"
   else
-    fail "expected cursor-drift warning not found"
+    fail "expected 1 line of startup output, got $QUIET_LINES:"
+    sed 's/^/      /' /tmp/kw_quiet.log
   fi
-
-  if system_profiler SPDisplaysDataType 2>/dev/null | grep -qi "Sidecar"; then
-    if grep -qi "sidecar display is currently connected" /tmp/kw_cursor_warn.log; then
-      pass "additional Sidecar-specific warning shown when Sidecar is connected"
-    else
-      fail "expected Sidecar-specific addendum not found"
-    fi
+  if grep -qi "warning:" /tmp/kw_quiet.log; then
+    fail "clean run emitted a warning; startup is supposed to be silent"
+    grep -i "warning:" /tmp/kw_quiet.log | sed 's/^/      /'
   else
-    skip "Sidecar-specific addendum check (no Sidecar currently connected)"
+    pass "clean run emits no warnings"
   fi
-  kill -INT "$KWC" 2>/dev/null
-  wait_for_exit "$KWC"
+  kill -INT "$KWQ" 2>/dev/null
+  wait_for_exit "$KWQ"
 fi
 
 # The sections below (caffeinate integration, command wrapping, -w) don't
@@ -208,7 +185,7 @@ fi
 # Apple-Silicon/clean-baseline-dependent.
 section "caffeinate integration"
 
-"$KEEPAWAKE" --force >/tmp/kw_caffeinate_default.log 2>&1 &
+"$KEEPAWAKE" >/tmp/kw_caffeinate_default.log 2>&1 &
 KWCA=$!
 disown
 sleep 1
@@ -233,14 +210,70 @@ else
   fail "expected 'thermal-cutoff critical' in the default status line"
 fi
 
-"$KEEPAWAKE" --force --thermal serious -t 1 >/tmp/kw_thermal_serious.log 2>&1
+"$KEEPAWAKE" --thermal serious -t 1 >/tmp/kw_thermal_serious.log 2>&1
 if grep -q "thermal-cutoff serious" /tmp/kw_thermal_serious.log; then
   pass "--thermal serious is reflected in the status line"
 else
   fail "expected 'thermal-cutoff serious' in the status line with --thermal serious"
 fi
 
-"$KEEPAWAKE" --force -d -s >/tmp/kw_caffeinate_flags.log 2>&1 &
+section "Battery cutoff"
+
+if grep -q "battery-cutoff 5%" /tmp/kw_caffeinate_default.log; then
+  pass "default run reports battery-cutoff 5% in its status line"
+else
+  fail "expected 'battery-cutoff 5%' in the default status line"
+fi
+
+"$KEEPAWAKE" --battery none -t 1 >/tmp/kw_batt_none.log 2>&1
+if grep -q "battery-cutoff none" /tmp/kw_batt_none.log; then
+  pass "--battery none is reflected in the status line"
+else
+  fail "expected 'battery-cutoff none' in the status line"
+fi
+
+"$KEEPAWAKE" --battery 20 -t 1 >/tmp/kw_batt_20.log 2>&1
+if grep -q "battery-cutoff 20%" /tmp/kw_batt_20.log; then
+  pass "--battery 20 is reflected in the status line"
+else
+  fail "expected 'battery-cutoff 20%' in the status line"
+fi
+
+for BAD in 0 100 -5 abc; do
+  "$KEEPAWAKE" --battery "$BAD" >/tmp/kw_batt_bad.log 2>&1
+  if [ $? -ne 0 ] && grep -q "between 1 and 99" /tmp/kw_batt_bad.log; then
+    pass "--battery rejects '$BAD'"
+  else
+    fail "--battery '$BAD' should have been rejected"
+  fi
+done
+
+"$KEEPAWAKE" --battery >/tmp/kw_batt_missing.log 2>&1
+if [ $? -ne 0 ]; then
+  pass "--battery rejects a missing value"
+else
+  fail "--battery with no value should fail"
+fi
+
+# Behavioral, not just cosmetic: the cutoff is gated on BOTH being on battery
+# power AND the lid being closed. The suite always runs with the lid open, so
+# even an absurd 99% threshold must not fire. This catches an inverted or
+# missing gate, which would otherwise only show up as keepawake mysteriously
+# quitting on a real closed-lid run.
+"$KEEPAWAKE" --battery 99 >/tmp/kw_batt_gate.log 2>&1 &
+KWBG=$!
+disown
+sleep 3
+if kill -0 "$KWBG" 2>/dev/null; then
+  pass "--battery 99 does not fire with the lid open (cutoff is correctly lid-gated)"
+else
+  fail "keepawake exited with --battery 99 and the lid open; the cutoff is not lid-gated"
+  cat /tmp/kw_batt_gate.log | sed 's/^/      /'
+fi
+kill -INT "$KWBG" 2>/dev/null
+wait_for_exit "$KWBG"
+
+"$KEEPAWAKE" -d -s >/tmp/kw_caffeinate_flags.log 2>&1 &
 KWCB=$!
 disown
 sleep 1
@@ -252,7 +285,7 @@ fi
 kill -INT "$KWCB" 2>/dev/null
 wait_for_exit "$KWCB"
 
-"$KEEPAWAKE" --force -d -i -m -s -u >/tmp/kw_caffeinate_allflags.log 2>&1 &
+"$KEEPAWAKE" -d -i -m -s -u >/tmp/kw_caffeinate_allflags.log 2>&1 &
 KWCC=$!
 disown
 sleep 1
@@ -266,7 +299,7 @@ wait_for_exit "$KWCC"
 
 section "Command wrapping"
 
-"$KEEPAWAKE" --force -- sh -c "exit 7" >/tmp/kw_wrap_exit.log 2>&1 &
+"$KEEPAWAKE" -- sh -c "exit 7" >/tmp/kw_wrap_exit.log 2>&1 &
 KWE=$!
 wait "$KWE" 2>/dev/null
 WRAP_EXIT=$?
@@ -286,7 +319,7 @@ else
   pass "internal caffeinate cleaned up after wrapped command exited on its own"
 fi
 
-"$KEEPAWAKE" --force -- sleep 30 >/tmp/kw_wrap_signal.log 2>&1 &
+"$KEEPAWAKE" -- sleep 30 >/tmp/kw_wrap_signal.log 2>&1 &
 KWW=$!
 disown
 sleep 1
@@ -305,14 +338,14 @@ else
   pass "wrapped command is terminated when keepawake receives SIGINT"
 fi
 
-"$KEEPAWAKE" --force -w 1 -- echo hi >/tmp/kw_mutex_w.log 2>&1
+"$KEEPAWAKE" -w 1 -- echo hi >/tmp/kw_mutex_w.log 2>&1
 if [ $? -ne 0 ] && grep -q "can't be combined with a wrapped command" /tmp/kw_mutex_w.log; then
   pass "-w and a wrapped command are rejected together (deliberately not matching caffeinate's silent-ignore here; see RESEARCH.md)"
 else
   fail "expected a mutual-exclusivity error for -w + wrapped command"
 fi
 
-"$KEEPAWAKE" --force -t 100 -- echo hi >/tmp/kw_mutex_t.log 2>&1
+"$KEEPAWAKE" -t 100 -- echo hi >/tmp/kw_mutex_t.log 2>&1
 if [ $? -ne 0 ] && grep -q "can't be combined with a wrapped command" /tmp/kw_mutex_t.log; then
   pass "--duration and a wrapped command are rejected together"
 else
@@ -324,7 +357,7 @@ section "-w (wait on external pid)"
 sleep 30 &
 TARGET_PID=$!
 disown
-"$KEEPAWAKE" --force -w "$TARGET_PID" >/tmp/kw_waitpid.log 2>&1 &
+"$KEEPAWAKE" -w "$TARGET_PID" >/tmp/kw_waitpid.log 2>&1 &
 KWWP=$!
 disown
 sleep 1
@@ -341,7 +374,7 @@ else
   kill -9 "$KWWP" 2>/dev/null
 fi
 
-"$KEEPAWAKE" --force -w 999999 >/tmp/kw_waitpid_bad.log 2>&1
+"$KEEPAWAKE" -w 999999 >/tmp/kw_waitpid_bad.log 2>&1
 if [ $? -ne 0 ] && grep -q "no such process" /tmp/kw_waitpid_bad.log; then
   pass "-w rejects a nonexistent pid"
 else
@@ -360,7 +393,7 @@ else
   BASELINE_CLAMSHELL=$(clamshell_prop)
   echo "  baseline AppleClamshellCausesSleep = $BASELINE_CLAMSHELL"
 
-  "$KEEPAWAKE" --force >/tmp/kw_run.log 2>&1 &
+  "$KEEPAWAKE" >/tmp/kw_run.log 2>&1 &
   KW_PID=$!
   disown
   sleep 2
@@ -402,25 +435,55 @@ else
   MAIN_X=$(echo "$MAIN_JSON" | jq '.frameX' 2>/dev/null)
 
   if [ -n "$MAIN_W" ] && [ -n "$PHANTOM_W" ]; then
-    read -r EXP_W EXP_H <<EOF
-$(python3 -c "
-import math
-w, h = $MAIN_W, $MAIN_H
-cap = 1654400.0
-pixels = w * h
-if pixels > cap:
-    scale = math.sqrt(cap / pixels)
-    print(int(w * scale), int(h * scale))
-else:
-    print(int(w), int(h))
+    # keepawake no longer computes a target size: it requests the main
+    # display's full native pixel size and lets macOS downsize to whatever the
+    # (version-dependent) CGVirtualDisplay pixel cap allows. So don't assert an
+    # exact resolution -- assert the two properties that actually matter.
+    #
+    # 1. Aspect ratio is preserved, so windows moved to the phantom aren't
+    #    reshaped more than necessary.
+    # 2. The phantom didn't collapse to a degenerate fallback. Requesting the
+    #    point size instead of the pixel size is the known way to trip this: on
+    #    a 16" MBP it yields 1024x662 (0.68M) instead of 1600x1034 (1.65M).
+    #    Anything at or above 1.4M means we landed near the cap as intended.
+    ASPECT_OK=$(python3 -c "
+main = $MAIN_W / $MAIN_H
+phantom = $PHANTOM_W / $PHANTOM_H
+print('yes' if abs(main - phantom) / main <= 0.02 else 'no')
 ")
-EOF
-    DIFF_W=$(python3 -c "print(abs($PHANTOM_W - $EXP_W))")
-    DIFF_H=$(python3 -c "print(abs($PHANTOM_H - $EXP_H))")
-    if [ "$DIFF_W" -le 2 ] && [ "$DIFF_H" -le 2 ]; then
-      pass "virtual display sized correctly (got ${PHANTOM_W}x${PHANTOM_H}, expected ~${EXP_W}x${EXP_H})"
+    if [ "$ASPECT_OK" == "yes" ]; then
+      pass "virtual display preserves the main display's aspect ratio (${PHANTOM_W}x${PHANTOM_H} vs ${MAIN_W}x${MAIN_H})"
     else
-      fail "virtual display size mismatch (got ${PHANTOM_W}x${PHANTOM_H}, expected ~${EXP_W}x${EXP_H})"
+      fail "virtual display aspect ratio does not match main (${PHANTOM_W}x${PHANTOM_H} vs ${MAIN_W}x${MAIN_H})"
+    fi
+
+    # The phantom must never be LARGER than the real display in points. It
+    # becomes the main display when the lid closes, and overshooting is far more
+    # disruptive than falling slightly short -- a 2x phantom would reflow every
+    # window into a space four times the area. Guards against the pixel cap
+    # rising in a future release and letting an oversized request through.
+    CEILING_OK=$(python3 -c "
+print('yes' if $PHANTOM_W <= $MAIN_W and $PHANTOM_H <= $MAIN_H else 'no')
+")
+    if [ "$CEILING_OK" == "yes" ]; then
+      pass "virtual display never exceeds the real display's point size (${PHANTOM_W}x${PHANTOM_H} <= ${MAIN_W}x${MAIN_H})"
+    else
+      fail "virtual display is LARGER than the real display (${PHANTOM_W}x${PHANTOM_H} vs ${MAIN_W}x${MAIN_H}); this would reflow every window on lid close"
+    fi
+
+    SIZE_OK=$(python3 -c "
+phantom_px = $PHANTOM_W * $PHANTOM_H
+main_px = $MAIN_W * $MAIN_H
+# If the main display is itself small enough to fit under the cap, the phantom
+# should simply match it; otherwise expect a near-cap result.
+print('yes' if phantom_px >= min(main_px, 1_400_000) else 'no')
+")
+    if [ "$SIZE_OK" == "yes" ]; then
+      PX=$(python3 -c "print(f'{$PHANTOM_W * $PHANTOM_H / 1e6:.2f}M')")
+      pass "virtual display landed near the pixel cap, not a degenerate fallback ($PX px)"
+    else
+      PX=$(python3 -c "print(f'{$PHANTOM_W * $PHANTOM_H / 1e6:.2f}M')")
+      fail "virtual display collapsed to a small fallback size (${PHANTOM_W}x${PHANTOM_H}, $PX px)"
     fi
 
     # keepawake parks the phantom at the far-right outer edge, bottom-aligned to
@@ -451,7 +514,7 @@ print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
 
   section "Instance locking"
 
-  "$KEEPAWAKE" --force >/tmp/kw_second_instance.log 2>&1
+  "$KEEPAWAKE" >/tmp/kw_second_instance.log 2>&1
   SECOND_EXIT=$?
   if [ "$SECOND_EXIT" -ne 0 ] && grep -q "already running" /tmp/kw_second_instance.log; then
     pass "second instance refuses to start while one is already running"
@@ -476,14 +539,14 @@ print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
     fail "virtual display still present after SIGINT (count=$DISPLAY_COUNT_AFTER)"
   fi
 
-  "$KEEPAWAKE" --force -t 2 >/tmp/kw_relock.log 2>&1
+  "$KEEPAWAKE" -t 2 >/tmp/kw_relock.log 2>&1
   if grep -q "running (virtual display" /tmp/kw_relock.log; then
     pass "lock released after SIGINT teardown (new instance started fine)"
   else
     fail "lock not released after SIGINT teardown; new instance could not start"
   fi
 
-  "$KEEPAWAKE" --force >/tmp/kw_run2.log 2>&1 &
+  "$KEEPAWAKE" >/tmp/kw_run2.log 2>&1 &
   KW_PID2=$!
   disown
   sleep 2
@@ -504,7 +567,7 @@ print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
 
   section "Duration auto-stop"
 
-  "$KEEPAWAKE" --force -t 3 >/tmp/kw_duration.log 2>&1 &
+  "$KEEPAWAKE" -t 3 >/tmp/kw_duration.log 2>&1 &
   KW_PID3=$!
   disown
   sleep 2
