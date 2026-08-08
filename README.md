@@ -23,18 +23,17 @@ cd cli/keepawake
 ./build.sh
 ```
 
-Then (drop the leading `./` if you installed via Homebrew):
+Then:
 
 ```
-./keepawake                    # run until Ctrl-C
-./keepawake -t 3600            # run for 1 hour, then stop automatically
-./keepawake -- ./backup.sh     # run a command, stop when it exits
+keepawake                    # run until Ctrl-C
+keepawake -t 3600            # run for 1 hour, then stop automatically
+keepawake -- ./backup.sh     # run a command, stop when it exits
 ```
 
-Run it before closing the lid. Ctrl-C, the `--duration` timer elapsing, or a
+Keepawake uses the same settings as caffeinate. Ctrl-C, the `--duration` timer elapsing, or a
 wrapped command exiting all release the hold and let normal sleep resume. Full
-CLI usage, including the `caffeinate`-compatible `-d -i -m -s -u -w` flags:
-[cli/keepawake/README.md](cli/keepawake/README.md).
+CLI usage, including the `caffeinate`-compatible `-d -i -m -s -u -w` flags: [cli/keepawake/README.md](cli/keepawake/README.md).
 
 
 ## The problem
