@@ -1,3 +1,5 @@
+## Apparently pmset \*does\* work on Apple Silicon (whoops!), and while keepawake suppresses sleep when closed and plugged in, it cannot suppress sleep on battery when plugged in. I'll be updating keepawake shortly in v 0.3 to use pmset instead, which will require a one-time `sudo` call. Until then, keepawake cannot fully guarantee your device will not sleep. 
+
 # keepawake
 
 Keep an Apple Silicon Mac awake with the lid closed: no external display, no
