@@ -269,7 +269,7 @@ EXPECTED_RULE=/tmp/kw_expected.sudoers
 # below validates a stale file from a previous run -- passing vacuously.
 rm -f "$EXPECTED_RULE"
 cat > "$EXPECTED_RULE" <<EOF
-# keepawake $BIN_VERSION — installed by \`sudo keepawake install\`
+# keepawake $BIN_VERSION, installed by \`sudo keepawake install\`
 # Grants exactly two commands: taking and releasing the system sleep hold.
 # Remove with \`sudo keepawake uninstall\`.
 %admin ALL=(root) NOPASSWD: $PMSET -a disablesleep 1, $PMSET -a disablesleep 0
@@ -321,8 +321,8 @@ if [ "$RULE_INSTALLED" -eq 0 ]; then
   section "Hold behavior"
   skip "all hold tests (sudoers rule not installed; run 'sudo keepawake install')"
 
-  # Either prerequisite can be the missing one — the sudoers rule or the
-  # root-created lock file — and they fail at different points with different
+  # Either prerequisite can be the missing one, the sudoers rule or the
+  # root-created lock file, and they fail at different points with different
   # text. The invariant is the same: refuse to start, and name the one command
   # that fixes it.
   "$KEEPAWAKE" -t 1 >/tmp/kw_preflight.log 2>&1

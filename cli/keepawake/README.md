@@ -1,7 +1,6 @@
 # keepawake
 
-Keep a Mac awake — lid closed or open, on battery or AC — with no external
-display, no dummy HDMI plug, and no kext. See
+Keep a Mac awake - even on battery with the lid closed. See
 [the project README](../../README.md) for how it works and the known
 limitations.
 
@@ -65,14 +64,14 @@ reference.
 
 Two cutoffs guard against keepawake being the reason a machine comes to harm.
 Both **release the hold without stopping the session**, and re-take it when
-conditions recover — so a transient thermal spike doesn't kill a long job, and
+conditions recover, so a transient thermal spike doesn't kill a long job, and
 plugging in after a low-battery release restores protection.
 
-- `--battery <pct>|none` (default `10`) — release at that battery percentage, so
+- `--battery <pct>|none` (default `10`): release at that battery percentage, so
   an unattended machine doesn't run itself flat. Never fires on AC power.
   Event-driven via `IOPSNotificationCreateRunLoopSource`, not polled. Re-taken
   on AC, or once charge climbs 5 points above the cutoff.
-- `--thermal none|serious|critical` (default `critical`) — release under thermal
+- `--thermal none|serious|critical` (default `critical`): release under thermal
   pressure, for when keepawake gets left running somewhere the machine can't
   shed heat. Re-taken once thermal state returns to nominal, after a 60s dwell so
   it can't chatter. `serious` is reached by ordinary heavy CPU/GPU work, so it's
@@ -90,7 +89,7 @@ stderr, so it's visible without polluting a wrapped command's output.
 Sessions compose, so keepawake stays a drop-in `caffeinate` replacement in
 scripts: a run started while another is active joins it rather than failing. The
 hold is one global setting rather than a per-process assertion, so participation
-is tracked with a shared `flock(2)` on `/var/db/keepawake.lock` — every session
+is tracked with a shared `flock(2)` on `/var/db/keepawake.lock`: every session
 that currently wants the machine awake holds a share, and the last one to leave
 clears the hold. The
 kernel drops a dead process's share, so a `kill -9`ed session strands nothing as
@@ -100,5 +99,5 @@ Sessions OR together the way caffeinate's assertions do: the machine stays awake
 while anyone still wants it, and a `--battery` or `--thermal` cutoff firing in
 one session won't force the hold off for another that set different thresholds.
 
-`pmset -g` reports `SleepDisabled` on its first line — the quickest way to check
+`pmset -g` reports `SleepDisabled` on its first line, the quickest way to check
 whether a hold is currently active.

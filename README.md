@@ -1,7 +1,6 @@
 # keepawake
 
-Keep a Mac awake — lid closed or open, on battery or AC — with no external
-display, no dummy HDMI plug, and no kernel extension.
+Keep a Mac awake - even on battery with the lid closed. 
 
 ## Install
 
@@ -15,7 +14,7 @@ Or build from source with `cd cli/keepawake && ./build.sh`, then run
 `sudo ./keepawake install`.
 
 The one-time `install` step adds a sudoers rule permitting exactly two
-commands — taking and releasing the sleep hold — and nothing else, plus the
+commands (taking and releasing the sleep hold) and nothing else, plus the
 lock file sessions use to coordinate. Remove both at any time with
 `sudo keepawake uninstall`. See [How it works](#how-it-works) for what the rule
 contains and why it's needed. Works on Apple Silicon and Intel.
@@ -48,7 +47,7 @@ AC-power gate is stated outright in `caffeinate`'s own man page, for `-s`:
 
 So an unplugged Mac with the lid closed sleeps when idle no matter how many
 assertions are held. Attaching a real monitor or a dummy HDMI plug satisfies the
-display gate, but that's the hardware dependency this project exists to avoid —
+display gate, but that's the hardware dependency this project exists to avoid,
 and on battery it doesn't help anyway.
 
 ## How it works
@@ -59,7 +58,7 @@ keepawake holds the system-wide `SleepDisabled` power-management setting, via
 That setting is why this works where assertions don't. Run `pmset -g` and it is
 reported in its own **System-wide power settings** block, outside the AC/Battery
 split that every other setting lives in. It isn't an assertion competing with
-power-source policy — `powerd` consults it directly, and it is power-source
+power-source policy: `powerd` consults it directly, and it is power-source
 independent.
 
 Setting it requires root, which is what the one-time `sudo keepawake install`
@@ -87,10 +86,10 @@ The hold is unbreakable in a way an assertion isn't, which makes the cutoffs the
 most important part of the tool. Both **release the hold without ending the
 session**, and re-take it when conditions recover:
 
-- `--battery <pct>|none` (default `10`) — releases on battery at that
+- `--battery <pct>|none` (default `10`): releases on battery at that
   percentage, so an unattended machine doesn't run itself flat. Never fires on
   AC. Re-taken when you plug in.
-- `--thermal none|serious|critical` (default `critical`) — releases under
+- `--thermal none|serious|critical` (default `critical`): releases under
   thermal pressure, for when keepawake is left running somewhere the machine
   can't shed heat. Re-taken once thermal state returns to nominal. `serious` is
   reached by ordinary heavy CPU/GPU work, so it's opt-in and only acts with the
@@ -117,8 +116,8 @@ to "why won't this Mac sleep?".
 ## Known limitations
 
 - **The hold is system-wide.** It is one global setting, not a per-process
-  assertion. Concurrent sessions are fine — they share a `flock(2)`, and the last
-  one out releases the hold — but that also means the last session ending clears
+  assertion. Concurrent sessions are fine: they share a `flock(2)`, and the last
+  one out releases the hold, but that also means the last session ending clears
   a hold you set by hand outside keepawake.
 - **Requires an admin user.** The sudoers rule is granted to the `admin` group.
 
@@ -134,7 +133,7 @@ without it. A physical lid close still has to be tested by hand.
 ## History
 
 Before 0.3.0, keepawake defeated clamshell sleep by registering a software-only
-virtual display through the private `CGVirtualDisplay` API — no hardware, but it
+virtual display through the private `CGVirtualDisplay` API, no hardware, but it
 only ever satisfied the *display* gate. The AC-power gate remained, so an
 unplugged machine still slept with the lid closed. `SleepDisabled` clears both,
 which retired the private API along with its cursor drift, its WindowServer

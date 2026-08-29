@@ -1,5 +1,5 @@
-// keepawake: prevent this Mac from sleeping — lid open or closed, on battery or
-// AC — by holding the system-wide `SleepDisabled` power-management setting via
+// keepawake: prevent this Mac from sleeping, lid open or closed, on battery or
+// AC, by holding the system-wide `SleepDisabled` power-management setting via
 // `pmset`, gated by a narrow sudoers rule installed once with
 // `sudo keepawake install`.
 //
@@ -21,7 +21,7 @@ let installPath = "/usr/bin/install"
 let sudoersRulePath = "/etc/sudoers.d/keepawake"
 // System-wide on purpose. NSTemporaryDirectory() is per-uid on macOS, so a lock
 // living there would only serialize one user's sessions while the thing it
-// guards — `SleepDisabled` — is a single global setting. Two logged-in users, or
+// guards, `SleepDisabled`, is a single global setting. Two logged-in users, or
 // `sudo keepawake` alongside an ordinary one, would each take "the" lock and
 // then fight over one hold.
 //
@@ -30,7 +30,7 @@ let sudoersRulePath = "/etc/sudoers.d/keepawake"
 // name that doesn't exist yet. An attacker who wins that race with a symlink
 // turns a session's open(O_CREAT)/fchmod into arbitrary file creation, and a
 // chmod to 0666, as whoever runs keepawake next. /var/db is root-owned 0755, so
-// only root can place this path — which is why `install` creates the file and
+// only root can place this path, which is why `install` creates the file and
 // sessions merely open it.
 let lockFilePath = "/var/db/keepawake.lock"
 
@@ -138,14 +138,14 @@ func run(_ path: String, _ arguments: [String]) -> (status: Int32, output: Strin
     return (proc.terminationStatus, String(data: data, encoding: .utf8) ?? "")
 }
 
-// Is any session currently participating — i.e. does anyone want the machine
+// Is any session currently participating, i.e. does anyone want the machine
 // awake right now? Answered by trying to take the lock exclusively on a fresh
 // descriptor: shared and exclusive conflict, so success means no shares exist.
 // flock is dropped by the kernel on every exit path, `kill -9` included, so
 // there is no stale-lock case to reason about here.
 func anySessionActive() -> Bool {
     // O_NOFOLLOW as belt-and-braces: only root can write /var/db, but a lock file
-    // that turned into a symlink is never something to follow. No O_CREAT — the
+    // that turned into a symlink is never something to follow. No O_CREAT: the
     // file is install's to create, and a missing one means no session can exist.
     let fd = open(lockFilePath, O_RDWR | O_NOFOLLOW)
     guard fd != -1 else { return false }
@@ -164,7 +164,7 @@ func anySessionActive() -> Bool {
 // The version comment lets a stale rule be spotted after an upgrade.
 func sudoersRuleText() -> String {
     """
-    # keepawake \(toolVersion) — installed by `sudo keepawake install`
+    # keepawake \(toolVersion), installed by `sudo keepawake install`
     # Grants exactly two commands: taking and releasing the system sleep hold.
     # Remove with `sudo keepawake uninstall`.
     %admin ALL=(root) NOPASSWD: \(pmsetPath) -a disablesleep 1, \(pmsetPath) -a disablesleep 0
@@ -176,7 +176,7 @@ func sudoersRuleText() -> String {
 //
 // `sudo -l <cmd>` cannot answer this. It reports whether the user may *ever*
 // run the command, and macOS grants admins a blanket `%admin ALL=(ALL) ALL`, so
-// it succeeds for every command — it returns 0 for `/bin/rm -rf /` just as
+// it succeeds for every command: it returns 0 for `/bin/rm -rf /` just as
 // readily as for ours. Worse, once any NOPASSWD rule exists the listing itself
 // stops requiring a password, so `-n` doesn't discriminate either. A machine
 // carrying some unrelated NOPASSWD rule would pass the check and then fail at
@@ -225,7 +225,7 @@ func installSudoersRule() -> Never {
     // The participation lock lives in root-owned /var/db so that no unprivileged
     // user can pre-place it (see lockFilePath). That means root has to create it
     // here: sessions open it 0666 but never create it. Empty file, contents
-    // irrelevant — only flock(2) state on it matters.
+    // irrelevant; only flock(2) state on it matters.
     let emptyPath = tempPath + ".lock"
     defer { try? FileManager.default.removeItem(atPath: emptyPath) }
     FileManager.default.createFile(atPath: emptyPath, contents: Data())
@@ -293,7 +293,7 @@ func releaseStaleHold() -> Never {
     if anySessionActive() {
         die("""
         keepawake is currently running, so the hold isn't stale. Stop the running \
-        session (or sessions) — the last one out releases the hold on exit.
+        session (or sessions); the last one out releases the hold on exit.
         """)
     }
 
@@ -324,7 +324,7 @@ var waitPid: pid_t?
 var thermalCutoff: ThermalCutoff = .critical
 // Percentage at or below which the hold is released. Raised from 5% for 0.3.0:
 // the hold is now unbreakable where the old one wasn't, so this is the only
-// thing between an unattended machine and a flat battery — and since a cutoff
+// thing between an unattended machine and a flat battery, and since a cutoff
 // now only suspends the hold rather than ending the session, firing early is
 // cheap.
 var batteryCutoff: Int? = 10
@@ -457,7 +457,7 @@ guard hasSudoersRule() else {
 // ---- Participation lock ----
 //
 // `SleepDisabled` is one global setting with no owner, so the hard part is not
-// taking it — that is idempotent, every session can simply set it — but knowing
+// taking it (that is idempotent, every session can simply set it) but knowing
 // when it is safe to CLEAR it. A written reference count would answer that and
 // reintroduce exactly the failure this design exists to avoid: a `kill -9` leaks
 // a decrement, and unlike a stranded hold a leaked count is unrecoverable,
@@ -472,7 +472,7 @@ guard hasSudoersRule() else {
 // the hold.
 //
 // The share means "this session wants the hold right now", not merely "this
-// session exists" — a safety cutoff drops it and re-takes it through the same
+// session exists": a safety cutoff drops it and re-takes it through the same
 // path as startup and teardown. Sessions therefore OR together the way
 // caffeinate's assertions do: the machine stays awake while anyone still wants
 // it, and one session's cutoff cannot force another's hold off.
@@ -496,7 +496,7 @@ guard lockFD != -1 else {
 // file and no state to keep in sync. The one cost is that a hold set by hand
 // outside keepawake is cleared when the last session ends.
 
-// Whether THIS session currently holds a share — that is, whether it currently
+// Whether THIS session currently holds a share, that is, whether it currently
 // wants the machine awake. Distinct from whether `SleepDisabled` is set, which
 // is global and may be being held on our behalf by another session.
 var participating = false
@@ -520,7 +520,7 @@ func setHold(_ wanted: Bool) -> Bool {
         // holds this exclusively is another session inside its own brief
         // last-one-out check, so the wait is bounded by one subprocess spawn.
         // Setting the hold is idempotent, so there is no need to work out
-        // whether we are the first session in — every session just sets it.
+        // whether we are the first session in: every session just sets it.
         flock(lockFD, LOCK_SH)
         participating = true
         // Argv must match the sudoers rule token-for-token; see sudoersRuleText().
@@ -538,7 +538,7 @@ func setHold(_ wanted: Bool) -> Bool {
     // unlocked first is what makes the exclusive retake meaningful: if it
     // succeeds, no other session holds a share, so we are the last one out and
     // the hold is ours to clear. If it fails, someone else still wants the
-    // machine awake — leave the hold alone.
+    // machine awake; leave the hold alone.
     flock(lockFD, LOCK_UN)
     participating = false
     guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { return true }
@@ -605,9 +605,9 @@ func batteryPercent() -> Int? {
 // A cutoff releases the hold and keeps running; it does not end the session.
 // Session lifetime belongs to -t/-w/command/signal ("the reason to be awake is
 // over"); a cutoff answers a different question ("it is unsafe to be awake right
-// now"), and conflating the two meant a transient thermal spike permanently
-// killed a session, and that plugging in after a low-battery release left the
-// remaining work unprotected.
+// now"). Conflating the two used to mean a transient thermal spike killed the
+// session outright, and that a low-battery release stayed in effect even after
+// plugging back in.
 //
 // Each cutoff latches its own reason, so recovery on one doesn't depend on the
 // other, and each has a deadband so the hold can't chatter at the threshold.
@@ -625,8 +625,8 @@ var lastNonNominalThermal: Date?
 var thermalRecheckPending = false
 
 // Does the current thermal state meet the configured cutoff? `serious` is
-// reached by ordinary heavy CPU/GPU work, so it only acts with the lid closed —
-// the in-a-bag case — and is opt-in. `critical` acts regardless of lid state.
+// reached by ordinary heavy CPU/GPU work, so it only acts with the lid closed
+// (the in-a-bag case) and is opt-in. `critical` acts regardless of lid state.
 // Suppress only when the lid is *confirmed* open, so an unreadable lid state
 // still errs toward releasing.
 @Sendable
@@ -666,7 +666,7 @@ func reconcileHold() {
             // it stops changing, so no further thermalStateDidChangeNotification
             // is coming and nothing else would re-drive this. Without the timer
             // the hold stays released until some unrelated event (a battery or
-            // display change) happens to reconcile — on a desktop Mac, possibly
+            // display change) happens to reconcile; on a desktop Mac, possibly
             // never.
             thermalRecheckPending = true
             DispatchQueue.main.asyncAfter(deadline: .now() + dwellRemaining) {
@@ -681,7 +681,7 @@ func reconcileHold() {
     }
 
     // Battery: on battery the level only falls, so the realistic resume trigger
-    // is AC being connected — a discrete event that can't flap. The percentage
+    // is AC being connected: a discrete event that can't flap. The percentage
     // margin covers a charge that climbs back without a power-source change.
     if let cutoff = batteryCutoff {
         if batteryHeldOff {
@@ -765,7 +765,7 @@ func teardown() {
 // exit() concurrently, which is undefined.
 //
 // So: hop to main if we aren't there, and run once. The main queue is serial, so
-// checking the flag on it is enough — no lock required.
+// checking the flag on it is enough; no lock required.
 var isShuttingDown = false
 
 @Sendable
@@ -784,8 +784,8 @@ func finish(_ message: String, status: Int32) {
 // ---- Clean shutdown on Ctrl-C / termination ----
 //
 // Installed BEFORE the hold is taken, deliberately. Everything between taking
-// the hold and reaching the run loop — spawning the wrapped command, printing
-// the status line, registering the cutoff observers — is a window in which a
+// the hold and reaching the run loop (spawning the wrapped command, printing
+// the status line, registering the cutoff observers) is a window in which a
 // Ctrl-C would otherwise hit SIGINT's default disposition and kill the process
 // with `SleepDisabled` already set, stranding it with no session running. The
 // handler only writes to a pipe, so it is safe to have live this early: a signal
@@ -793,21 +793,21 @@ func finish(_ message: String, status: Int32) {
 // moment CFRunLoopRun() begins.
 //
 // The handler does the only async-signal-safe thing it can: one write() to a
-// pipe. Everything real — printing, clearing the hold through `sudo pmset`,
-// terminating children — happens back on the run loop, where it is ordinary
+// pipe. Everything real (printing, clearing the hold through `sudo pmset`,
+// terminating children) happens back on the run loop, where it is ordinary
 // code again. Doing that work in signal context meant calling print(), fork and
 // exec, and exit() from a handler that may have interrupted an in-flight
 // Process, which can deadlock on the allocator locks that fork inherits. Coming
 // back through the main queue also removes the re-entrancy: a shutdown can no
 // longer land in the middle of reconcileHold()'s own pmset call.
 //
-// A DispatchSourceSignal would escape signal context too, and an earlier attempt
-// at one never fired — not because of the bare CFRunLoopRun() (that does pump
-// the main GCD queue; the --duration timer below and the thermal dwell re-check
-// both rely on it), but because a dispatch signal source observes a signal *in
-// addition to* its default disposition, so each signal has to be SIG_IGN'd
-// alongside it. That is exactly why it isn't used here: SIG_IGN survives exec,
-// so a wrapped command would silently inherit it and ignore Ctrl-C. An
+// A DispatchSourceSignal would escape signal context too, but isn't used here.
+// An earlier attempt at one never fired; the bare CFRunLoopRun() isn't the
+// culprit (it does pump the main GCD queue, which the --duration timer below
+// and the thermal dwell re-check both rely on). The real issue: a dispatch
+// signal source observes a signal *in addition to* its default disposition,
+// so each signal still needs SIG_IGN'd alongside it. But SIG_IGN survives
+// exec, so a wrapped command would silently inherit it and ignore Ctrl-C. An
 // installed handler is reset to SIG_DFL in the child instead.
 
 var shutdownPipe: [Int32] = [-1, -1]
