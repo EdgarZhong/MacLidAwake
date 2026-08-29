@@ -1,24 +1,34 @@
 #!/bin/bash
 # Automated test suite for keepawake. macOS-only, by necessity (everything
-# here pokes real OS-level display/power state).
+# here pokes real OS-level power state).
 #
-# What this DOES verify empirically: the virtual display gets created with
-# the right name/size, AppleClamshellCausesSleep flips to No while it's
-# running, teardown happens correctly on SIGINT/SIGTERM/--duration, and
-# basic CLI argument handling.
+# What this DOES verify empirically: the generated sudoers rule passes visudo
+# validation and grants only the two intended commands, the `SleepDisabled`
+# hold is taken at startup and cleared on every exit path (SIGINT, SIGTERM,
+# SIGHUP, --duration, -w, wrapped-command exit), the privileged subcommands
+# refuse to run unprivileged, and basic CLI argument handling.
 #
-# What this CANNOT verify: whether the machine actually stays awake through
-# a real physical lid close. There is no software path to simulate
-# AppleClamshellState; that remains a manual test (see the closing note below).
+# What this CANNOT verify: whether the machine actually stays awake through a
+# real physical lid close, and whether a cutoff fires against real hardware
+# conditions (draining a battery to 10% or driving thermal state to critical
+# on demand aren't things a test can arrange). Those remain manual; see the
+# closing note.
 #
-# Tests that assume a clean single-display baseline are skipped if a real
-# external display is already attached.
+# Tests that take a real hold need the sudoers rule installed
+# (`sudo keepawake install`) and skip cleanly without it.
 
 set -uo pipefail
 cd "$(dirname "$0")"
 REPO_ROOT="$(cd .. && pwd)"
 CLI_DIR="$REPO_ROOT/cli/keepawake"
 KEEPAWAKE="$CLI_DIR/keepawake"
+
+PMSET=/usr/bin/pmset
+SUDOERS_RULE=/etc/sudoers.d/keepawake
+# Created by `keepawake install`, as root: it lives in root-owned /var/db so no
+# unprivileged user can pre-place a symlink there. Sessions open it but never
+# create it, so its absence means no session can start.
+LOCK_FILE=/var/db/keepawake.lock
 
 PASS=0
 FAIL=0
@@ -29,24 +39,24 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 skip() { echo "  SKIP: $1"; SKIP=$((SKIP + 1)); }
 section() { echo ""; echo "== $1 =="; }
 
-display_type_count() {
-  # NOTE: "Display Type:" is only present for real/built-in displays,
-  # CGVirtualDisplay-backed entries omit that key entirely. "Resolution:"
-  # is present on every display entry we've observed, real or virtual.
-  system_profiler SPDisplaysDataType 2>/dev/null | grep -c "Resolution:"
+# The single source of truth for whether a hold is active. `pmset -g` reports
+# it under "System-wide power settings", outside the AC/Battery split.
+sleep_disabled() {
+  $PMSET -g 2>/dev/null | awk '/SleepDisabled/{print $2; exit}'
 }
 
-clamshell_prop() {
-  ioreg -r -k AppleClamshellCausesSleep 2>/dev/null \
-    | awk -F'= ' '/AppleClamshellCausesSleep/{gsub(/[^A-Za-z]/,"",$2); print $2}'
+# Does the sudoers rule grant the hold commands without a password? -n keeps
+# this from blocking on a password prompt when the rule is absent.
+# NOTE: `sudo -l <cmd>` is useless here. macOS grants admins a blanket
+# `%admin ALL=(ALL) ALL`, so it reports success for every command, and once any
+# NOPASSWD rule exists the listing stops requiring a password too. Parse the
+# listing for an entry that is both NOPASSWD and names the hold command.
+has_sudoers_rule() {
+  sudo -n -l 2>/dev/null | grep -q "NOPASSWD.*$PMSET -a disablesleep 1"
 }
 
-screen_info() {
-  swift "$REPO_ROOT/tests/screen_info.swift" 2>/dev/null
-}
-
-# Poll until a PID actually exits (and its lock/display are gone) instead of
-# guessing a fixed sleep duration; avoids flaky races between test sections.
+# Poll until a PID actually exits instead of guessing a fixed sleep duration;
+# avoids flaky races between test sections.
 wait_for_exit() {
   local pid="$1"
   local timeout="${2:-5}"
@@ -61,22 +71,56 @@ wait_for_exit() {
   return 0
 }
 
+# Wait for SleepDisabled to reach an expected value, rather than sleeping a
+# fixed amount: the pmset call is a subprocess and settles asynchronously.
+wait_for_hold() {
+  local want="$1"
+  local timeout="${2:-5}"
+  local waited=0
+  while [ "$(sleep_disabled)" != "$want" ]; do
+    sleep 0.2
+    waited=$(echo "$waited + 0.2" | bc)
+    if (($(echo "$waited >= $timeout" | bc))); then
+      return 1
+    fi
+  done
+  return 0
+}
+
 cleanup_stray_processes() {
   pkill -f "$KEEPAWAKE" 2>/dev/null
   sleep 1
+  # Never leave a hold behind, whatever happened above.
+  if has_sudoers_rule; then
+    sudo -n "$PMSET" -a disablesleep 0 >/dev/null 2>&1
+  fi
 }
 trap cleanup_stray_processes EXIT
 
 cleanup_stray_processes
 
 section "Preconditions"
-INITIAL_DISPLAY_COUNT=$(display_type_count)
-if [ "$INITIAL_DISPLAY_COUNT" -gt 1 ]; then
-  echo "  external display(s) already attached ($INITIAL_DISPLAY_COUNT total)"
-  SKIP_HARDWARE_TESTS=1
+# Both halves of `install` are needed: the sudoers rule to take the hold without
+# a password, and the root-created lock file to join the participation lock.
+if has_sudoers_rule && [ -e "$LOCK_FILE" ]; then
+  pass "sudoers rule and lock file present; hold tests will run"
+  RULE_INSTALLED=1
+elif has_sudoers_rule; then
+  echo "  sudoers rule present but $LOCK_FILE is missing."
+  echo "  Re-run 'sudo keepawake install' to create it (idempotent) and cover the hold tests."
+  RULE_INSTALLED=0
 else
-  pass "no external display attached (clean single-display baseline)"
-  SKIP_HARDWARE_TESTS=0
+  echo "  sudoers rule not installed (run 'sudo keepawake install' to cover the hold tests)"
+  RULE_INSTALLED=0
+fi
+
+if [ "$(sleep_disabled)" == "0" ]; then
+  pass "no sleep hold active at start (clean baseline)"
+else
+  echo "  WARNING: SleepDisabled is already 1 before testing; clearing it"
+  if [ "$RULE_INSTALLED" -eq 1 ]; then
+    sudo -n "$PMSET" -a disablesleep 0 >/dev/null 2>&1
+  fi
 fi
 
 section "Build"
@@ -87,6 +131,13 @@ else
   echo ""
   echo "Cannot continue without a working binary."
   exit 1
+fi
+
+if grep -qi "warning:" /tmp/keepawake_build.log; then
+  fail "build emitted warnings"
+  grep -i "warning:" /tmp/keepawake_build.log | head -5 | sed 's/^/      /'
+else
+  pass "build is warning-free"
 fi
 
 section "Argument parsing"
@@ -127,6 +178,8 @@ else
   fail "binary reports $BIN_VERSION but tag v$TAG_VERSION is newer; toolVersion is stale"
 fi
 
+# These all fail during parsing, before the sudoers preflight, so they run
+# whether or not the rule is installed.
 "$KEEPAWAKE" --duration abc >/tmp/kw_bad.log 2>&1
 if [ $? -ne 0 ] && grep -q "positive number" /tmp/kw_bad.log; then
   pass "--duration rejects non-numeric input"
@@ -162,208 +215,18 @@ else
   fail "--thermal with no value should fail"
 fi
 
-ARCH=$(uname -m)
-if [ "$ARCH" == "x86_64" ]; then
-  "$KEEPAWAKE" >/tmp/kw_intel.log 2>&1
-  if [ $? -ne 0 ] && grep -qi "intel" /tmp/kw_intel.log; then
-    pass "refuses to run on Intel"
-  else
-    fail "expected a refusal message on Intel hardware"
-  fi
+"$KEEPAWAKE" --battery 150 >/tmp/kw_batt_bad.log 2>&1
+if [ $? -ne 0 ] && grep -q "between 1 and 99" /tmp/kw_batt_bad.log; then
+  pass "--battery rejects an out-of-range percentage"
 else
-  skip "Intel-refusal check (running on $ARCH, not Intel)"
+  fail "--battery 150 should fail with a range error"
 fi
 
-section "Startup output is quiet"
-
-# A clean run should print exactly one line: the status line. The battery and
-# cursor-drift warnings were deliberately removed (a permanent property of the
-# mechanism belongs in the README, not on every launch), so assert their
-# absence rather than their presence -- otherwise they could creep back in.
-if [ "$ARCH" == "x86_64" ]; then
-  skip "quiet-startup check (Intel dies at the arch guard before reaching this)"
+"$KEEPAWAKE" -w 999999 >/tmp/kw_waitpid_bad.log 2>&1
+if [ $? -ne 0 ] && grep -q "no such process" /tmp/kw_waitpid_bad.log; then
+  pass "-w rejects a nonexistent pid"
 else
-  "$KEEPAWAKE" >/tmp/kw_quiet.log 2>&1 &
-  KWQ=$!
-  disown
-  sleep 2
-  QUIET_LINES=$(grep -c . /tmp/kw_quiet.log)
-  if [ "$QUIET_LINES" -eq 1 ]; then
-    pass "clean run prints exactly one line of output"
-  else
-    fail "expected 1 line of startup output, got $QUIET_LINES:"
-    sed 's/^/      /' /tmp/kw_quiet.log
-  fi
-  if grep -qi "warning:" /tmp/kw_quiet.log; then
-    fail "clean run emitted a warning; startup is supposed to be silent"
-    grep -i "warning:" /tmp/kw_quiet.log | sed 's/^/      /'
-  else
-    pass "clean run emits no warnings"
-  fi
-  kill -INT "$KWQ" 2>/dev/null
-  wait_for_exit "$KWQ"
-fi
-
-# The sections below (caffeinate integration, command wrapping, -w) don't
-# depend on a single-display baseline or on the phantom display actually
-# registering with WindowServer; on Intel, apply() reports success even
-# though nothing really registers, so these still exercise
-# real code paths there. Only the "Virtual display creation" and
-# clamshell-property assertions further down are genuinely
-# Apple-Silicon/clean-baseline-dependent.
-section "caffeinate integration"
-
-"$KEEPAWAKE" >/tmp/kw_caffeinate_default.log 2>&1 &
-KWCA=$!
-disown
-sleep 1
-if pgrep -f "caffeinate -i -w $KWCA" >/dev/null; then
-  pass "default run spawns internal caffeinate with -i (matches caffeinate's own default)"
-else
-  fail "expected an internal 'caffeinate -i -w $KWCA' process, none found"
-fi
-kill -INT "$KWCA" 2>/dev/null
-wait_for_exit "$KWCA"
-sleep 1
-if pgrep -f "caffeinate .* -w $KWCA" >/dev/null; then
-  fail "internal caffeinate still running after keepawake stopped (SIGINT)"
-else
-  pass "internal caffeinate exits when keepawake is stopped (SIGINT)"
-fi
-
-# The running status line advertises the thermal-cutoff level (default critical).
-if grep -q "thermal-cutoff critical" /tmp/kw_caffeinate_default.log; then
-  pass "default run reports thermal-cutoff critical in its status line"
-else
-  fail "expected 'thermal-cutoff critical' in the default status line"
-fi
-
-"$KEEPAWAKE" --thermal serious -t 1 >/tmp/kw_thermal_serious.log 2>&1
-if grep -q "thermal-cutoff serious" /tmp/kw_thermal_serious.log; then
-  pass "--thermal serious is reflected in the status line"
-else
-  fail "expected 'thermal-cutoff serious' in the status line with --thermal serious"
-fi
-
-section "Battery cutoff"
-
-if grep -q "battery-cutoff 5%" /tmp/kw_caffeinate_default.log; then
-  pass "default run reports battery-cutoff 5% in its status line"
-else
-  fail "expected 'battery-cutoff 5%' in the default status line"
-fi
-
-"$KEEPAWAKE" --battery none -t 1 >/tmp/kw_batt_none.log 2>&1
-if grep -q "battery-cutoff none" /tmp/kw_batt_none.log; then
-  pass "--battery none is reflected in the status line"
-else
-  fail "expected 'battery-cutoff none' in the status line"
-fi
-
-"$KEEPAWAKE" --battery 20 -t 1 >/tmp/kw_batt_20.log 2>&1
-if grep -q "battery-cutoff 20%" /tmp/kw_batt_20.log; then
-  pass "--battery 20 is reflected in the status line"
-else
-  fail "expected 'battery-cutoff 20%' in the status line"
-fi
-
-for BAD in 0 100 -5 abc; do
-  "$KEEPAWAKE" --battery "$BAD" >/tmp/kw_batt_bad.log 2>&1
-  if [ $? -ne 0 ] && grep -q "between 1 and 99" /tmp/kw_batt_bad.log; then
-    pass "--battery rejects '$BAD'"
-  else
-    fail "--battery '$BAD' should have been rejected"
-  fi
-done
-
-"$KEEPAWAKE" --battery >/tmp/kw_batt_missing.log 2>&1
-if [ $? -ne 0 ]; then
-  pass "--battery rejects a missing value"
-else
-  fail "--battery with no value should fail"
-fi
-
-# Behavioral, not just cosmetic: the cutoff is gated on BOTH being on battery
-# power AND the lid being closed. The suite always runs with the lid open, so
-# even an absurd 99% threshold must not fire. This catches an inverted or
-# missing gate, which would otherwise only show up as keepawake mysteriously
-# quitting on a real closed-lid run.
-"$KEEPAWAKE" --battery 99 >/tmp/kw_batt_gate.log 2>&1 &
-KWBG=$!
-disown
-sleep 3
-if kill -0 "$KWBG" 2>/dev/null; then
-  pass "--battery 99 does not fire with the lid open (cutoff is correctly lid-gated)"
-else
-  fail "keepawake exited with --battery 99 and the lid open; the cutoff is not lid-gated"
-  cat /tmp/kw_batt_gate.log | sed 's/^/      /'
-fi
-kill -INT "$KWBG" 2>/dev/null
-wait_for_exit "$KWBG"
-
-"$KEEPAWAKE" -d -s >/tmp/kw_caffeinate_flags.log 2>&1 &
-KWCB=$!
-disown
-sleep 1
-if pgrep -f "caffeinate -ds -w $KWCB" >/dev/null; then
-  pass "-d -s flags passed through to internal caffeinate"
-else
-  fail "expected 'caffeinate -ds -w $KWCB', not found"
-fi
-kill -INT "$KWCB" 2>/dev/null
-wait_for_exit "$KWCB"
-
-"$KEEPAWAKE" -d -i -m -s -u >/tmp/kw_caffeinate_allflags.log 2>&1 &
-KWCC=$!
-disown
-sleep 1
-if pgrep -f "caffeinate -dimsu -w $KWCC" >/dev/null; then
-  pass "all five assertion flags (-d -i -m -s -u) passed through together"
-else
-  fail "expected 'caffeinate -dimsu -w $KWCC', not found"
-fi
-kill -INT "$KWCC" 2>/dev/null
-wait_for_exit "$KWCC"
-
-section "Command wrapping"
-
-"$KEEPAWAKE" -- sh -c "exit 7" >/tmp/kw_wrap_exit.log 2>&1 &
-KWE=$!
-wait "$KWE" 2>/dev/null
-WRAP_EXIT=$?
-if [ "$WRAP_EXIT" -eq 7 ]; then
-  pass "wrapped command's exit code is propagated"
-else
-  fail "expected exit 7 from wrapped command, got $WRAP_EXIT"
-fi
-if grep -q "wrapped command exited (status 7)" /tmp/kw_wrap_exit.log; then
-  pass "wrapped-command-exit message printed"
-else
-  fail "expected wrapped-command-exit message not found"
-fi
-if pgrep -f "caffeinate .* -w $KWE" >/dev/null; then
-  fail "internal caffeinate leaked after wrapped command exited on its own"
-else
-  pass "internal caffeinate cleaned up after wrapped command exited on its own"
-fi
-
-"$KEEPAWAKE" -- sleep 30 >/tmp/kw_wrap_signal.log 2>&1 &
-KWW=$!
-disown
-sleep 1
-WRAPPED_PID=$(pgrep -P "$KWW" -f sleep)
-if [ -n "$WRAPPED_PID" ]; then
-  pass "wrapped command started as a child of keepawake"
-else
-  fail "could not find wrapped 'sleep' child process"
-fi
-kill -INT "$KWW" 2>/dev/null
-wait_for_exit "$KWW"
-sleep 1
-if [ -n "$WRAPPED_PID" ] && kill -0 "$WRAPPED_PID" 2>/dev/null; then
-  fail "wrapped command still running after keepawake was interrupted"
-else
-  pass "wrapped command is terminated when keepawake receives SIGINT"
+  fail "expected '-w 999999' to fail with 'no such process'"
 fi
 
 "$KEEPAWAKE" -w 1 -- echo hi >/tmp/kw_mutex_w.log 2>&1
@@ -380,174 +243,174 @@ else
   fail "expected a mutual-exclusivity error for -t + wrapped command"
 fi
 
-section "-w (wait on external pid)"
+section "Privileged subcommands"
 
-sleep 30 &
-TARGET_PID=$!
-disown
-"$KEEPAWAKE" -w "$TARGET_PID" >/tmp/kw_waitpid.log 2>&1 &
-KWWP=$!
-disown
-sleep 1
-if kill -0 "$KWWP" 2>/dev/null; then
-  pass "keepawake stays running while the -w target pid is alive"
+"$KEEPAWAKE" install >/tmp/kw_install_nonroot.log 2>&1
+if [ $? -ne 0 ] && grep -q "must run as root" /tmp/kw_install_nonroot.log; then
+  pass "install refuses to run unprivileged"
 else
-  fail "keepawake exited early while target pid was still alive"
-fi
-kill "$TARGET_PID" 2>/dev/null
-if wait_for_exit "$KWWP" 5; then
-  pass "keepawake stops once the -w target pid exits"
-else
-  fail "keepawake did not stop after target pid exited"
-  kill -9 "$KWWP" 2>/dev/null
+  fail "install should refuse to run without root"
 fi
 
-"$KEEPAWAKE" -w 999999 >/tmp/kw_waitpid_bad.log 2>&1
-if [ $? -ne 0 ] && grep -q "no such process" /tmp/kw_waitpid_bad.log; then
-  pass "-w rejects a nonexistent pid"
+"$KEEPAWAKE" uninstall >/tmp/kw_uninstall_nonroot.log 2>&1
+if [ $? -ne 0 ] && grep -q "must run as root" /tmp/kw_uninstall_nonroot.log; then
+  pass "uninstall refuses to run unprivileged"
 else
-  fail "expected '-w 999999' to fail with 'no such process'"
+  fail "uninstall should refuse to run without root"
 fi
 
-cleanup_stray_processes
+# The rule keepawake would install must survive visudo validation. A malformed
+# file in sudoers.d breaks sudo system-wide, so this is the highest-stakes
+# assertion in the suite. Build the expected text independently of the binary
+# so a regression in either side shows up as a mismatch.
+EXPECTED_RULE=/tmp/kw_expected.sudoers
+# Must be removed first: it's written 0440, so a second run of this suite can't
+# overwrite it in place. Without this the write fails silently and the check
+# below validates a stale file from a previous run -- passing vacuously.
+rm -f "$EXPECTED_RULE"
+cat > "$EXPECTED_RULE" <<EOF
+# keepawake $BIN_VERSION — installed by \`sudo keepawake install\`
+# Grants exactly two commands: taking and releasing the system sleep hold.
+# Remove with \`sudo keepawake uninstall\`.
+%admin ALL=(root) NOPASSWD: $PMSET -a disablesleep 1, $PMSET -a disablesleep 0
+EOF
+chmod 0440 "$EXPECTED_RULE"
 
-if [ "$SKIP_HARDWARE_TESTS" -eq 1 ]; then
-  skip "virtual display creation/sizing/clamshell tests (external display already attached)"
-  skip "shutdown-behavior tests (external display already attached)"
-  skip "duration auto-stop tests (external display already attached)"
+if ! grep -q "disablesleep" "$EXPECTED_RULE" 2>/dev/null; then
+  fail "could not write the expected rule file; the visudo check below would be vacuous"
+elif /usr/sbin/visudo -cf "$EXPECTED_RULE" >/tmp/kw_visudo.log 2>&1; then
+  pass "generated sudoers rule passes visudo validation"
 else
-  section "Virtual display creation"
+  fail "generated sudoers rule FAILS visudo validation: $(cat /tmp/kw_visudo.log)"
+fi
 
-  BASELINE_CLAMSHELL=$(clamshell_prop)
-  echo "  baseline AppleClamshellCausesSleep = $BASELINE_CLAMSHELL"
+# Confirm visudo actually rejects garbage, so the check above isn't vacuous.
+printf 'this is not valid sudoers\n' > /tmp/kw_bad.sudoers
+if /usr/sbin/visudo -cf /tmp/kw_bad.sudoers >/dev/null 2>&1; then
+  fail "visudo accepted a malformed rule; the install-time validation is not protective"
+else
+  pass "visudo rejects a malformed rule (validation is meaningful)"
+fi
+
+if [ "$RULE_INSTALLED" -eq 1 ]; then
+  # Scope is checked against the `sudo -l` listing, not by reading the file:
+  # it's installed 0440 root:wheel and deliberately unreadable to a normal user.
+  # Only NOPASSWD lines matter -- the blanket `%admin ALL=(ALL) ALL` that macOS
+  # ships covers every command anyway, but demands a password, so it isn't a
+  # grant this rule is responsible for.
+  NOPASSWD_LINES=$(sudo -n -l 2>/dev/null | grep "NOPASSWD")
+
+  if echo "$NOPASSWD_LINES" | grep -q "$PMSET -a disablesleep 0"; then
+    pass "installed rule grants the release command"
+  else
+    fail "installed rule does not grant the release command"
+  fi
+
+  # Any NOPASSWD pmset grant beyond the two disablesleep forms is too wide.
+  if echo "$NOPASSWD_LINES" | grep -q "hibernatemode\|sleep 0 \|disablesleep [^01]"; then
+    fail "installed rule grants an unintended pmset command; the grant is too wide"
+    echo "$NOPASSWD_LINES" | sed 's/^/      /'
+  else
+    pass "installed rule grants no pmset command beyond the two disablesleep forms"
+  fi
+else
+  skip "installed-rule scope checks (rule not installed)"
+fi
+
+if [ "$RULE_INSTALLED" -eq 0 ]; then
+  section "Hold behavior"
+  skip "all hold tests (sudoers rule not installed; run 'sudo keepawake install')"
+
+  # Either prerequisite can be the missing one — the sudoers rule or the
+  # root-created lock file — and they fail at different points with different
+  # text. The invariant is the same: refuse to start, and name the one command
+  # that fixes it.
+  "$KEEPAWAKE" -t 1 >/tmp/kw_preflight.log 2>&1
+  if [ $? -ne 0 ] && grep -q "keepawake install" /tmp/kw_preflight.log; then
+    pass "preflight fails with an actionable message when a prerequisite is absent"
+  else
+    fail "expected a preflight error naming 'sudo keepawake install'"
+  fi
+else
+
+  section "Hold lifecycle"
 
   "$KEEPAWAKE" >/tmp/kw_run.log 2>&1 &
   KW_PID=$!
   disown
-  sleep 2
-
-  if grep -q "running (virtual display" /tmp/kw_run.log; then
-    pass "keepawake reports running"
+  if wait_for_hold 1; then
+    pass "SleepDisabled set to 1 while keepawake runs"
   else
-    fail "keepawake did not print running status"
+    fail "SleepDisabled did not reach 1 after startup"
   fi
 
-  DISPLAY_COUNT_NOW=$(display_type_count)
-  if [ "$DISPLAY_COUNT_NOW" -eq 2 ]; then
-    pass "virtual display appears in system_profiler"
+  if grep -q "running (sleep hold active" /tmp/kw_run.log; then
+    pass "status line reports the hold as active"
   else
-    fail "expected 2 displays, got $DISPLAY_COUNT_NOW"
+    fail "expected 'running (sleep hold active' in the status line"
   fi
 
-  if system_profiler SPDisplaysDataType 2>/dev/null | grep -q "Keepawake Phantom Display"; then
-    pass "virtual display has expected name"
+  section "Startup output is quiet"
+
+  # A clean run should print exactly one line: the status line. Cutoff activity
+  # goes to stderr and only on an actual event, so assert the absence of
+  # warnings rather than their presence -- otherwise they could creep back in.
+  QUIET_LINES=$(grep -c . /tmp/kw_run.log)
+  if [ "$QUIET_LINES" -eq 1 ]; then
+    pass "clean run prints exactly one line of output"
   else
-    fail "virtual display name not found"
+    fail "expected 1 line of startup output, got $QUIET_LINES:"
+    sed 's/^/      /' /tmp/kw_run.log
+  fi
+  if grep -qi "warning:" /tmp/kw_run.log; then
+    fail "clean run emitted a warning; startup is supposed to be silent"
+    grep -i "warning:" /tmp/kw_run.log | sed 's/^/      /'
+  else
+    pass "clean run emits no warnings"
   fi
 
-  SCREENS_JSON=$(screen_info)
-  SCREEN_COUNT=$(echo "$SCREENS_JSON" | jq 'length' 2>/dev/null)
-  if [ "$SCREEN_COUNT" == "2" ]; then
-    pass "NSScreen.screens count is 2"
+  section "Concurrent sessions"
+
+  # Sessions compose: the hold is a shared flock, so a second session joins
+  # rather than being refused, and the hold survives until the LAST one leaves.
+  "$KEEPAWAKE" >/tmp/kw_second_instance.log 2>&1 &
+  KW_SECOND_PID=$!
+  disown
+  if wait_for_exit "$KW_SECOND_PID" 3; then
+    fail "second concurrent session exited instead of joining"
+    cat /tmp/kw_second_instance.log
   else
-    fail "expected NSScreen count 2, got $SCREEN_COUNT"
+    pass "second concurrent session starts alongside the first"
+  fi
+  if [ "$(sleep_disabled)" == "1" ]; then
+    pass "hold still held with two sessions running"
+  else
+    fail "hold not set with two sessions running"
   fi
 
-  MAIN_JSON=$(echo "$SCREENS_JSON" | jq '.[] | select(.isMain==true)' 2>/dev/null)
-  PHANTOM_JSON=$(echo "$SCREENS_JSON" | jq '.[] | select(.isMain==false)' 2>/dev/null)
-  MAIN_W=$(echo "$MAIN_JSON" | jq '.frameW' 2>/dev/null)
-  MAIN_H=$(echo "$MAIN_JSON" | jq '.frameH' 2>/dev/null)
-  PHANTOM_W=$(echo "$PHANTOM_JSON" | jq '.frameW' 2>/dev/null)
-  PHANTOM_H=$(echo "$PHANTOM_JSON" | jq '.frameH' 2>/dev/null)
-  PHANTOM_X=$(echo "$PHANTOM_JSON" | jq '.frameX' 2>/dev/null)
-  MAIN_X=$(echo "$MAIN_JSON" | jq '.frameX' 2>/dev/null)
-
-  if [ -n "$MAIN_W" ] && [ -n "$PHANTOM_W" ]; then
-    # keepawake no longer computes a target size: it requests the main
-    # display's full native pixel size and lets macOS downsize to whatever the
-    # (version-dependent) CGVirtualDisplay pixel cap allows. So don't assert an
-    # exact resolution -- assert the two properties that actually matter.
-    #
-    # 1. Aspect ratio is preserved, so windows moved to the phantom aren't
-    #    reshaped more than necessary.
-    # 2. The phantom didn't collapse to a degenerate fallback. Requesting the
-    #    point size instead of the pixel size is the known way to trip this: on
-    #    a 16" MBP it yields 1024x662 (0.68M) instead of 1600x1034 (1.65M).
-    #    Anything at or above 1.4M means we landed near the cap as intended.
-    ASPECT_OK=$(python3 -c "
-main = $MAIN_W / $MAIN_H
-phantom = $PHANTOM_W / $PHANTOM_H
-print('yes' if abs(main - phantom) / main <= 0.02 else 'no')
-")
-    if [ "$ASPECT_OK" == "yes" ]; then
-      pass "virtual display preserves the main display's aspect ratio (${PHANTOM_W}x${PHANTOM_H} vs ${MAIN_W}x${MAIN_H})"
-    else
-      fail "virtual display aspect ratio does not match main (${PHANTOM_W}x${PHANTOM_H} vs ${MAIN_W}x${MAIN_H})"
-    fi
-
-    # The phantom must never be LARGER than the real display in points. It
-    # becomes the main display when the lid closes, and overshooting is far more
-    # disruptive than falling slightly short -- a 2x phantom would reflow every
-    # window into a space four times the area. Guards against the pixel cap
-    # rising in a future release and letting an oversized request through.
-    CEILING_OK=$(python3 -c "
-print('yes' if $PHANTOM_W <= $MAIN_W and $PHANTOM_H <= $MAIN_H else 'no')
-")
-    if [ "$CEILING_OK" == "yes" ]; then
-      pass "virtual display never exceeds the real display's point size (${PHANTOM_W}x${PHANTOM_H} <= ${MAIN_W}x${MAIN_H})"
-    else
-      fail "virtual display is LARGER than the real display (${PHANTOM_W}x${PHANTOM_H} vs ${MAIN_W}x${MAIN_H}); this would reflow every window on lid close"
-    fi
-
-    SIZE_OK=$(python3 -c "
-phantom_px = $PHANTOM_W * $PHANTOM_H
-main_px = $MAIN_W * $MAIN_H
-# If the main display is itself small enough to fit under the cap, the phantom
-# should simply match it; otherwise expect a near-cap result.
-print('yes' if phantom_px >= min(main_px, 1_400_000) else 'no')
-")
-    if [ "$SIZE_OK" == "yes" ]; then
-      PX=$(python3 -c "print(f'{$PHANTOM_W * $PHANTOM_H / 1e6:.2f}M')")
-      pass "virtual display landed near the pixel cap, not a degenerate fallback ($PX px)"
-    else
-      PX=$(python3 -c "print(f'{$PHANTOM_W * $PHANTOM_H / 1e6:.2f}M')")
-      fail "virtual display collapsed to a small fallback size (${PHANTOM_W}x${PHANTOM_H}, $PX px)"
-    fi
-
-    # keepawake parks the phantom at the far-right outer edge, bottom-aligned to
-    # its neighbor (macOS keeps arrangements gap-free, so the origin request
-    # clamps to a contiguous edge). On a single-display machine the neighbor
-    # is the main display, so the phantom's left edge should sit exactly at the
-    # main display's right edge. Assert that.
-    ADJACENT=$(python3 -c "
-main_x1 = $MAIN_X + $MAIN_W
-print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
-")
-    if [ "$ADJACENT" == "yes" ]; then
-      pass "virtual display parked at the main display's right edge (far-right, as intended)"
-    else
-      fail "virtual display not parked at the expected far-right edge (got phantom x=$PHANTOM_X, main right edge=$((MAIN_X + MAIN_W)))"
-    fi
+  # The critical property: the first session leaving must NOT clear a hold the
+  # second still wants. This is what a naive single-owner design gets wrong.
+  kill -INT "$KW_SECOND_PID"
+  wait_for_exit "$KW_SECOND_PID" 5
+  sleep 0.5
+  if [ "$(sleep_disabled)" == "1" ]; then
+    pass "one session exiting leaves the hold intact for the session still running"
   else
-    fail "could not read screen geometry to check sizing/placement"
+    fail "hold was cleared while another session was still running"
   fi
 
-  RUNNING_CLAMSHELL=$(clamshell_prop)
-  echo "  with virtual display running, AppleClamshellCausesSleep = $RUNNING_CLAMSHELL"
-  if [ "$RUNNING_CLAMSHELL" == "No" ]; then
-    pass "AppleClamshellCausesSleep reads No with virtual display active"
+  # And a SIGKILLed participant must not strand the hold either: the kernel
+  # drops its share, so the next session to leave still sees itself as last out.
+  "$KEEPAWAKE" >/tmp/kw_third_instance.log 2>&1 &
+  KW_THIRD_PID=$!
+  disown
+  sleep 1
+  kill -9 "$KW_THIRD_PID" 2>/dev/null
+  wait_for_exit "$KW_THIRD_PID" 5
+  if [ "$(sleep_disabled)" == "1" ]; then
+    pass "hold survives a SIGKILLed participant while another session runs"
   else
-    fail "AppleClamshellCausesSleep reads $RUNNING_CLAMSHELL (note: this property has been observed to be an unreliable instantaneous read in manual testing; a failure here is worth rechecking by hand, not necessarily proof the mechanism is broken)"
-  fi
-
-  section "Instance locking"
-
-  "$KEEPAWAKE" >/tmp/kw_second_instance.log 2>&1
-  SECOND_EXIT=$?
-  if [ "$SECOND_EXIT" -ne 0 ] && grep -q "already running" /tmp/kw_second_instance.log; then
-    pass "second instance refuses to start while one is already running"
-  else
-    fail "second instance should have refused to start (exit=$SECOND_EXIT)"
+    fail "hold lost after a participant was SIGKILLed"
   fi
 
   section "Shutdown behavior"
@@ -558,84 +421,243 @@ print('yes' if abs($PHANTOM_X - main_x1) <= 2 else 'no')
   else
     fail "process still alive after SIGINT"
     kill -9 "$KW_PID" 2>/dev/null
-    sleep 1
   fi
-  DISPLAY_COUNT_AFTER=$(display_type_count)
-  if [ "$DISPLAY_COUNT_AFTER" -eq 1 ]; then
-    pass "virtual display torn down after SIGINT"
+  if wait_for_hold 0; then
+    pass "hold released after SIGINT"
   else
-    fail "virtual display still present after SIGINT (count=$DISPLAY_COUNT_AFTER)"
+    fail "SleepDisabled still 1 after SIGINT"
   fi
 
   "$KEEPAWAKE" -t 2 >/tmp/kw_relock.log 2>&1
-  if grep -q "running (virtual display" /tmp/kw_relock.log; then
-    pass "lock released after SIGINT teardown (new instance started fine)"
+  if grep -q "running (sleep hold active" /tmp/kw_relock.log; then
+    pass "a fresh session starts cleanly after the last one exited"
   else
-    fail "lock not released after SIGINT teardown; new instance could not start"
+    fail "fresh session could not start after the last one exited"
   fi
 
-  "$KEEPAWAKE" >/tmp/kw_run2.log 2>&1 &
-  KW_PID2=$!
-  disown
-  sleep 2
-  kill -TERM "$KW_PID2"
-  if wait_for_exit "$KW_PID2"; then
-    pass "process exits after SIGTERM"
-  else
-    fail "process still alive after SIGTERM"
-    kill -9 "$KW_PID2" 2>/dev/null
-    sleep 1
-  fi
-  DISPLAY_COUNT_AFTER2=$(display_type_count)
-  if [ "$DISPLAY_COUNT_AFTER2" -eq 1 ]; then
-    pass "virtual display torn down after SIGTERM"
-  else
-    fail "virtual display still present after SIGTERM (count=$DISPLAY_COUNT_AFTER2)"
-  fi
+  for SIG in TERM HUP; do
+    "$KEEPAWAKE" >/tmp/kw_run_$SIG.log 2>&1 &
+    KW_SIG_PID=$!
+    disown
+    wait_for_hold 1
+    kill -$SIG "$KW_SIG_PID"
+    if wait_for_exit "$KW_SIG_PID"; then
+      pass "process exits after SIG$SIG"
+    else
+      fail "process still alive after SIG$SIG"
+      kill -9 "$KW_SIG_PID" 2>/dev/null
+    fi
+    if wait_for_hold 0; then
+      pass "hold released after SIG$SIG"
+    else
+      fail "SleepDisabled still 1 after SIG$SIG"
+    fi
+  done
 
   section "Duration auto-stop"
 
   "$KEEPAWAKE" -t 3 >/tmp/kw_duration.log 2>&1 &
   KW_PID3=$!
   disown
-  sleep 2
-  D1=$(display_type_count)
-  if [ "$D1" -eq 2 ]; then
-    pass "display present shortly after start (duration test)"
+  if wait_for_hold 1; then
+    pass "hold taken shortly after start (duration test)"
   else
-    fail "display not created for duration test"
+    fail "hold not taken for duration test"
   fi
-  sleep 4
-  if ! kill -0 "$KW_PID3" 2>/dev/null; then
+  if wait_for_exit "$KW_PID3" 8; then
     pass "process auto-exits after --duration elapses"
   else
     fail "process still alive after duration elapsed"
     kill -9 "$KW_PID3" 2>/dev/null
   fi
-  D2=$(display_type_count)
-  if [ "$D2" -eq 1 ]; then
-    pass "display torn down after duration auto-stop"
+  if wait_for_hold 0; then
+    pass "hold released after duration auto-stop"
   else
-    fail "display still present after duration auto-stop"
+    fail "SleepDisabled still 1 after duration auto-stop"
+  fi
+
+  section "caffeinate integration"
+
+  "$KEEPAWAKE" >/tmp/kw_caffeinate_default.log 2>&1 &
+  KWCA=$!
+  disown
+  sleep 1
+  if pgrep -f "caffeinate -i -w $KWCA" >/dev/null; then
+    pass "default run spawns internal caffeinate with -i (matches caffeinate's own default)"
+  else
+    fail "expected an internal 'caffeinate -i -w $KWCA' process, none found"
+  fi
+  kill -INT "$KWCA" 2>/dev/null
+  wait_for_exit "$KWCA"
+  sleep 1
+  if pgrep -f "caffeinate .* -w $KWCA" >/dev/null; then
+    fail "internal caffeinate still running after keepawake stopped (SIGINT)"
+  else
+    pass "internal caffeinate exits when keepawake is stopped (SIGINT)"
+  fi
+
+  # The running status line advertises both cutoffs and their defaults.
+  if grep -q "thermal-cutoff critical" /tmp/kw_caffeinate_default.log; then
+    pass "default run reports thermal-cutoff critical in its status line"
+  else
+    fail "expected 'thermal-cutoff critical' in the default status line"
+  fi
+  if grep -q "battery-cutoff 10%" /tmp/kw_caffeinate_default.log; then
+    pass "default run reports battery-cutoff 10% in its status line"
+  else
+    fail "expected 'battery-cutoff 10%' in the default status line"
+  fi
+
+  "$KEEPAWAKE" --thermal serious -t 1 >/tmp/kw_thermal_serious.log 2>&1
+  if grep -q "thermal-cutoff serious" /tmp/kw_thermal_serious.log; then
+    pass "--thermal serious is reflected in the status line"
+  else
+    fail "expected 'thermal-cutoff serious' in the status line with --thermal serious"
+  fi
+
+  "$KEEPAWAKE" --battery none -t 1 >/tmp/kw_batt_none.log 2>&1
+  if grep -q "battery-cutoff none" /tmp/kw_batt_none.log; then
+    pass "--battery none is reflected in the status line"
+  else
+    fail "expected 'battery-cutoff none' in the status line"
+  fi
+
+  section "Command wrapping"
+
+  "$KEEPAWAKE" -- sh -c "exit 7" >/tmp/kw_wrap_exit.log 2>&1 &
+  KWE=$!
+  wait "$KWE" 2>/dev/null
+  WRAP_EXIT=$?
+  if [ "$WRAP_EXIT" -eq 7 ]; then
+    pass "wrapped command's exit code is propagated"
+  else
+    fail "expected exit 7 from wrapped command, got $WRAP_EXIT"
+  fi
+  if grep -q "wrapped command exited (status 7)" /tmp/kw_wrap_exit.log; then
+    pass "wrapped-command-exit message printed"
+  else
+    fail "expected wrapped-command-exit message not found"
+  fi
+  if wait_for_hold 0; then
+    pass "hold released after wrapped command exited on its own"
+  else
+    fail "SleepDisabled still 1 after wrapped command exited"
+  fi
+  if pgrep -f "caffeinate .* -w $KWE" >/dev/null; then
+    fail "internal caffeinate leaked after wrapped command exited on its own"
+  else
+    pass "internal caffeinate cleaned up after wrapped command exited on its own"
+  fi
+
+  "$KEEPAWAKE" -- sleep 30 >/tmp/kw_wrap_signal.log 2>&1 &
+  KWW=$!
+  disown
+  sleep 1
+  WRAPPED_PID=$(pgrep -P "$KWW" -f sleep)
+  if [ -n "$WRAPPED_PID" ]; then
+    pass "wrapped command started as a child of keepawake"
+  else
+    fail "could not find wrapped 'sleep' child process"
+  fi
+  kill -INT "$KWW" 2>/dev/null
+  wait_for_exit "$KWW"
+  sleep 1
+  if [ -n "$WRAPPED_PID" ] && kill -0 "$WRAPPED_PID" 2>/dev/null; then
+    fail "wrapped command still running after keepawake was interrupted"
+  else
+    pass "wrapped command is terminated when keepawake receives SIGINT"
+  fi
+
+  section "-w (wait on external pid)"
+
+  sleep 30 &
+  TARGET_PID=$!
+  disown
+  "$KEEPAWAKE" -w "$TARGET_PID" >/tmp/kw_waitpid.log 2>&1 &
+  KWWP=$!
+  disown
+  sleep 1
+  if kill -0 "$KWWP" 2>/dev/null; then
+    pass "keepawake stays running while the -w target pid is alive"
+  else
+    fail "keepawake exited early while target pid was still alive"
+  fi
+  kill "$TARGET_PID" 2>/dev/null
+  if wait_for_exit "$KWWP" 5; then
+    pass "keepawake stops once the -w target pid exits"
+  else
+    fail "keepawake did not stop after target pid exited"
+    kill -9 "$KWWP" 2>/dev/null
+  fi
+  if wait_for_hold 0; then
+    pass "hold released after -w target exited"
+  else
+    fail "SleepDisabled still 1 after -w target exited"
+  fi
+
+  section "Stale-hold recovery"
+
+  # SIGKILL bypasses every handler, so the hold survives the process. This is
+  # the one failure mode the design accepts, and both documented recoveries
+  # must actually work.
+  "$KEEPAWAKE" >/tmp/kw_kill.log 2>&1 &
+  KWK=$!
+  disown
+  wait_for_hold 1
+  kill -9 "$KWK" 2>/dev/null
+  wait_for_exit "$KWK"
+  sleep 1
+  if [ "$(sleep_disabled)" == "1" ]; then
+    pass "SIGKILL leaves the hold set (expected; recovery is tested below)"
+  else
+    skip "stale-hold recovery (hold was already clear after SIGKILL)"
+  fi
+
+  "$KEEPAWAKE" --release >/tmp/kw_release.log 2>&1
+  if [ $? -eq 0 ] && wait_for_hold 0; then
+    pass "--release clears a stale hold"
+  else
+    fail "--release did not clear the stale hold"
+  fi
+
+  # The other documented recovery: any later run takes the hold and clears it
+  # on exit, so a stranded hold self-heals without an explicit --release.
+  sudo -n "$PMSET" -a disablesleep 1 >/dev/null 2>&1
+  "$KEEPAWAKE" -t 1 >/tmp/kw_reconcile.log 2>&1
+  if wait_for_hold 0; then
+    pass "an ordinary run reconciles a pre-existing stale hold on exit"
+  else
+    fail "a pre-existing hold survived an ordinary run"
   fi
 fi
 
+cleanup_stray_processes
+
 section "Known not automatable"
-echo "  Confirming the machine actually stays awake through a REAL physical"
-echo "  lid close is not covered here; there is no software path to"
-echo "  simulate AppleClamshellState. This suite validates every mechanism"
-echo "  up to that point."
+echo "  Two things this suite cannot cover:"
 echo
-echo "  To check it by hand, run this before and after a deliberate lid close"
-echo "  and reopen:"
+echo "  1. Whether the machine actually stays awake through a REAL physical"
+echo "     lid close. There is no software path to simulate"
+echo "     AppleClamshellState. To check by hand, run this before and after a"
+echo "     deliberate lid close and reopen:"
 echo
-echo "    pmset -g log | grep -i clamshell | tail -5"
+echo "       pmset -g log | grep -i clamshell | tail -5"
 echo
-echo "  That log is the ground truth. Don't substitute an instantaneous"
-echo "  \`ioreg -r -k AppleClamshellCausesSleep\` read: it has reported No on a"
-echo "  machine that in fact sleeps on every real lid close."
-echo "  experiments/clamshell-watch.sh polls the same properties live if you'd"
-echo "  rather watch than check the log afterward."
+echo "     That log is the ground truth. Don't substitute an instantaneous"
+echo "     \`ioreg -r -k AppleClamshellCausesSleep\` read: it has reported No on"
+echo "     a machine that in fact sleeps on every real lid close."
+echo "     experiments/clamshell-watch.sh polls the same properties live if"
+echo "     you'd rather watch than check the log afterward."
+echo
+echo "  2. Whether a cutoff fires and recovers against real conditions."
+echo "     Draining to 10% or forcing thermal state to critical on demand"
+echo "     isn't something a test can arrange. To check the battery path by"
+echo "     hand, run with a cutoff just under the current charge, e.g."
+echo
+echo "       keepawake --battery \$(( \$(pmset -g batt | grep -o '[0-9]*%' | tr -d '%') - 1 ))"
+echo
+echo "     then unplug and watch for the release message, and plug back in to"
+echo "     confirm the hold is re-taken. \`pmset -g | head -2\` shows the state."
 
 section "Summary"
 echo "  $PASS passed, $FAIL failed, $SKIP skipped"
