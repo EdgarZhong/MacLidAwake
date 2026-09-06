@@ -18,7 +18,7 @@ Sources/
     HoldSession.swift        signal pipe 与 Hold 生命周期
   lidgo/
     main.swift               CLI 解析、输出与内部 agent/root 入口
-Tests/
+tests/
   LidGoCoreTests/            纯单元和文件事务测试
 tests/
   run_tests.sh               无 sudo 命令级验收

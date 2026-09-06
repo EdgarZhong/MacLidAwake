@@ -7,8 +7,10 @@
 运行：
 
 ```bash
-swift test
+swift run LidGoCoreTests
 ```
+
+当前机器只有 Command Line Tools，其 Swift 6.3.2 不附带 `XCTest` 或 Swift Testing 模块；项目使用零依赖的 Swift 可执行测试 harness，并以非零退出码表示失败。
 
 覆盖：
 

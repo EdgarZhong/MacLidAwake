@@ -6,7 +6,7 @@
 
 **Architecture:** 使用 Swift Package 将纯 Lease 状态机与 macOS 系统适配器分离。CLI 只提交原子状态事务，常驻 LaunchAgent 监督 Timer、Hold 进程和安全条件，并通过保留的精确 sudoers 与全局 flock 协调 `pmset`。
 
-**Tech Stack:** Swift 6、Swift Package Manager、Foundation、Darwin/libproc、IOKit、AppKit/NSWorkspace、launchd、XCTest、Bash。
+**Tech Stack:** Swift 6、Swift Package Manager、Foundation、Darwin/libproc、IOKit、AppKit/NSWorkspace、launchd、零依赖 Swift 可执行测试 harness、Bash。
 
 **Spec:** `docs/product-spec.md`
 
@@ -33,9 +33,9 @@
 - Create: `Sources/LidGoCore/DurationParser.swift`
 - Create: `Sources/LidGoCore/StateStore.swift`
 - Create: `Sources/LidGoCore/LeaseCoordinator.swift`
-- Create: `Tests/LidGoCoreTests/DurationParserTests.swift`
-- Create: `Tests/LidGoCoreTests/LeaseCoordinatorTests.swift`
-- Create: `Tests/LidGoCoreTests/StateStoreTests.swift`
+- Create: `tests/LidGoCoreTests/DurationParserTests.swift`
+- Create: `tests/LidGoCoreTests/LeaseCoordinatorTests.swift`
+- Create: `tests/LidGoCoreTests/StateStoreTests.swift`
 - Modify: `CLAUDE.md`
 
 **Interfaces:**
@@ -44,7 +44,7 @@
 - Produces: `StateStore.withLock<T>(_ body: (inout RuntimeState, inout LidGoConfig) throws -> T) throws -> T`。
 - Produces: `LeaseCoordinator` 的 create/show/refresh/addHold/removeHold/forceToggle/reconcile/tripSafety 纯规则。
 
-- [ ] **Step 1: 写 duration 与配置失败测试**
+- [x] **Step 1: 写 duration 与配置失败测试**
 
 ```swift
 XCTAssertEqual(DurationParser.parse("90m"), 5_400)
@@ -55,13 +55,13 @@ XCTAssertNil(DurationParser.parse("1h-5m"))
 XCTAssertThrowsError(try LidGoConfig(defaultDurationSeconds: 3600, batteryCutoffPercent: 0).validated())
 ```
 
-- [ ] **Step 2: 运行定向测试并确认因类型不存在而失败**
+- [x] **Step 2: 运行定向测试并确认因类型不存在而失败**
 
-Run: `swift test --filter DurationParserTests`
+Run: `swift run LidGoCoreTests`
 
 Expected: 编译失败，报告 `DurationParser`/`LidGoConfig` 未定义。
 
-- [ ] **Step 3: 实现模型、路径和 duration parser**
+- [x] **Step 3: 实现模型、路径和 duration parser**
 
 ```swift
 public struct RuntimeState: Codable, Equatable, Sendable {
@@ -75,17 +75,17 @@ public struct RuntimeState: Codable, Equatable, Sendable {
 
 生产路径固定为 `~/Library/Application Support/MacLidAwake`；只有 `LIDGO_TESTING=1` 时允许 `LIDGO_HOME` 覆盖，防止普通运行被环境变量重定向到不可信路径。
 
-- [ ] **Step 4: 写 Lease 规则失败测试**
+- [x] **Step 4: 写 Lease 规则失败测试**
 
 测试必须逐项断言：默认 OFF 创建 Timer、重复默认不刷新、纯 Timer refresh、Hold 存在时 refresh 无状态变化、Timer+Hold、两个 Hold 独立释放、Timer 到期保留 Hold、force 清空并递增 generation、安全熔断清空且条件恢复不重建、dead/stopped/zombie/PID reuse 清理。
 
-- [ ] **Step 5: 运行定向测试并确认失败**
+- [x] **Step 5: 运行定向测试并确认失败**
 
-Run: `swift test --filter LeaseCoordinatorTests`
+Run: `swift run LidGoCoreTests`
 
 Expected: 编译失败或断言失败，因为 `LeaseCoordinator` 尚未实现。
 
-- [ ] **Step 6: 实现纯 LeaseCoordinator**
+- [x] **Step 6: 实现纯 LeaseCoordinator**
 
 ```swift
 public mutating func forceToggle(now: Date, config: LidGoConfig) -> ToggleResult {
@@ -105,21 +105,21 @@ public mutating func forceToggle(now: Date, config: LidGoConfig) -> ToggleResult
 
 所有方法返回用于 CLI 输出的不可变 result，调用方不在解锁后重新推导结果。
 
-- [ ] **Step 7: 写 StateStore 并发/损坏失败测试**
+- [x] **Step 7: 写 StateStore 并发/损坏失败测试**
 
 并发 50 次事务递增 generation，最终必须恰为 50；写入后 config/state 文件模式为 0600；损坏 JSON 必须按空 runtime fail-safe 返回诊断错误，不能保留伪 Lease。
 
-- [ ] **Step 8: 实现 flock 与原子 JSON StateStore**
+- [x] **Step 8: 实现 flock 与原子 JSON StateStore**
 
 同目录临时文件写入后执行 `synchronizeFile()`、`chmod(0600)`、`rename()`；锁文件打开时使用 `O_NOFOLLOW|O_CREAT`，父目录创建为 0700。
 
-- [ ] **Step 9: 运行 Task 1 全部测试**
+- [x] **Step 9: 运行 Task 1 全部测试**
 
-Run: `swift test --filter LidGoCoreTests`
+Run: `swift run LidGoCoreTests`
 
 Expected: 0 failures。
 
-- [ ] **Step 10: 审查并提交 Task 1**
+- [x] **Step 10: 审查并提交 Task 1**
 
 Run: `git diff --check`
 
@@ -134,9 +134,9 @@ Commit: `feat: add lease state core`
 - Create: `Sources/LidGoCore/PowerController.swift`
 - Create: `Sources/LidGoCore/SafetyMonitor.swift`
 - Create: `Sources/LidGoCore/AgentRuntime.swift`
-- Create: `Tests/LidGoCoreTests/ProcessInspectorTests.swift`
-- Create: `Tests/LidGoCoreTests/PowerControllerTests.swift`
-- Create: `Tests/LidGoCoreTests/AgentRuntimeTests.swift`
+- Create: `tests/LidGoCoreTests/ProcessInspectorTests.swift`
+- Create: `tests/LidGoCoreTests/PowerControllerTests.swift`
+- Create: `tests/LidGoCoreTests/AgentRuntimeTests.swift`
 - Modify: `CLAUDE.md`
 
 **Interfaces:**
@@ -184,11 +184,7 @@ Agent 每 1 秒 tick，并由 IOPS、thermal 与 wake 通知提前触发。每�
 
 - [ ] **Step 7: 运行 Task 2 全部测试**
 
-Run: `swift test --filter ProcessInspectorTests`
-
-Run: `swift test --filter PowerControllerTests`
-
-Run: `swift test --filter AgentRuntimeTests`
+Run: `swift run LidGoCoreTests`
 
 Expected: 全部 0 failures。
 
@@ -209,8 +205,8 @@ Commit: `feat: add launch agent runtime and safety cutoffs`
 - Create: `Sources/LidGoCore/SetupManager.swift`
 - Create: `Sources/lidgo/main.swift`
 - Modify: `Package.swift`
-- Create: `Tests/LidGoCoreTests/CommandTests.swift`
-- Create: `Tests/LidGoCoreTests/SetupManagerTests.swift`
+- Create: `tests/LidGoCoreTests/CommandTests.swift`
+- Create: `tests/LidGoCoreTests/SetupManagerTests.swift`
 - Create: `tests/run_tests.sh`
 - Modify: `CLAUDE.md`
 
@@ -254,7 +250,7 @@ handler 仅 `write()` 信号编号。INT/TERM/HUP/QUIT 统一 release+exit；TST
 
 - [ ] **Step 9: 运行 Task 3 验证**
 
-Run: `swift test`
+Run: `swift run LidGoCoreTests`
 
 Run: `bash tests/run_tests.sh`
 
@@ -289,7 +285,7 @@ Commit: `feat: implement lidgo commands and setup`
 
 - [ ] **Step 1: 写构建/CI/Formula/completion**
 
-`scripts/build.sh` 运行 `swift build -c release`；CI 使用 macOS runner 执行 `swift test`、命令级测试和 release build；Formula 从 `EdgarZhong/MacLidAwake` release source 构建并安装 `lidgo` 与 zsh completion，测试 `lidgo help`。在首个 tag 前 Formula 明确作为发布模板，不宣称可安装的已发布版本。
+`scripts/build.sh` 运行 `swift build -c release`；CI 使用 macOS runner 执行 `swift run LidGoCoreTests`、命令级测试和 release build；Formula 从 `EdgarZhong/MacLidAwake` release source 构建并安装 `lidgo` 与 zsh completion，测试 `lidgo help`。在首个 tag 前 Formula 明确作为发布模板，不宣称可安装的已发布版本。
 
 - [ ] **Step 2: 归档旧产品死代码**
 
@@ -307,7 +303,7 @@ README 记录稳定安装/使用、安全摘要、目录、开发命令、限制
 
 - [ ] **Step 4: 运行完整自动验证**
 
-Run: `swift test`
+Run: `swift run LidGoCoreTests`
 
 Run: `bash tests/run_tests.sh`
 

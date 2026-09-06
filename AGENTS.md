@@ -43,7 +43,7 @@
 4. 涉及状态机时覆盖 Timer、Hold、多 Hold、Timer+Hold、refresh、force、过期、stale、PID reuse 和 generation。
 5. 涉及信号时覆盖 SIGINT、SIGTERM、SIGHUP、SIGQUIT、SIGTSTP、SIGCONT，并用监督器测试覆盖不可捕获的 SIGSTOP。
 6. 涉及 setup 时验证 sudoers 正反例、文件模式、固定 argv、LaunchAgent plist 和幂等修复；自动测试不得弹出密码框。
-7. 完成前执行 `swift test`、命令级测试、Release 构建、文档/死代码扫描和 git diff 审查。
+7. 完成前执行 `swift run LidGoCoreTests`、命令级测试、Release 构建、文档/死代码扫描和 git diff 审查。
 8. 真实 sudo、真实 pmset、物理合盖、低电量与危险温度只按 `docs/testing.md` 的人工步骤执行，不能用模拟结果冒充硬件验收。
 
 ## 文件与 Git 约束

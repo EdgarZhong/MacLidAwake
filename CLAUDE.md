@@ -25,7 +25,7 @@
 
 ## 本轮任务看板
 
-- [ ] 阶段 1：建立 Swift Package、配置/Lease 模型、原子状态仓库和纯状态机测试。
+- [x] 阶段 1：建立 Swift Package、配置/Lease 模型、原子状态仓库和纯状态机测试（14 tests passed；Release warnings-as-errors 构建通过）。
 - [ ] 阶段 2：实现进程身份、pmset 协调、常驻 LaunchAgent 监督器、Timer 到期和 Battery/Thermal 熔断。
 - [ ] 阶段 3：实现公开 CLI、Hold 信号语义、setup/自检与命令级测试。
 - [ ] 阶段 4：完成命名迁移、README/docs/打包/CI/补全、归档死代码并做最终用户级验收。
@@ -41,6 +41,7 @@
 - 强制关闭和安全熔断清空 Lease 并递增 generation；普通 Hold 停止/死亡不递增，以允许同一前台进程在 SIGCONT 后有条件恢复。
 - Thermal 固定采用上游默认的 critical 门槛，不提供关闭入口；Battery 在电量小于等于配置阈值时触发，恢复条件不会自动重建 Lease。
 - 测试通过注入的目录、时钟、进程检查器和 pmset fake 覆盖全路径，不触碰当前外部 `SleepDisabled=1`。
+- Ruling：本机 Command Line Tools 的 Swift 6.3.2 不含 `XCTest`/Swift Testing；改用零依赖 `LidGoCoreTests` 可执行 harness。若判断错误，代价是偏离惯用 `swift test` 工作流，但不会降低断言范围或失败门禁。
 
 ## 当前风险与限制
 
