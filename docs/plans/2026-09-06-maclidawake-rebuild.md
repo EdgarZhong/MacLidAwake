@@ -216,39 +216,39 @@ Commit: `feat: add launch agent runtime and safety cutoffs`
 - Produces: `HoldSession.run()`。
 - Produces: `SetupManager.setup()`、`SetupManager.rootSetup()`、`SetupManager.selfCheck()`。
 
-- [ ] **Step 1: 写 CLI parser 失败测试**
+- [x] **Step 1: 写 CLI parser 失败测试**
 
 覆盖所有合法形态及等价别名；断言 `lidgo switch` 返回 confirmationRequired；断言 `status/on/off/start/stop/security/install/uninstall/--release/-t/-w/-disu` 全部失败且不改变状态。
 
-- [ ] **Step 2: 实现 Command 与输出格式**
+- [x] **Step 2: 实现 Command 与输出格式**
 
 帮助必须精简并包含：默认、refresh、hold、switch force、config、setup、help。Timer 输出包含剩余分钟和本地 deadline；Timer+Hold 同时逐行显示；refresh+Hold 输出拒绝原因。
 
-- [ ] **Step 3: 写 Hold 信号失败测试**
+- [x] **Step 3: 写 Hold 信号失败测试**
 
 命令级测试在 fake agent 环境中启动 Hold 并分别发送 INT、TERM、HUP、QUIT，断言自己的 Lease 被移除；发送 TSTP，断言停止前 Lease 已移除；发送 CONT，断言 generation 未变时恢复；先 force 再 CONT，断言不得恢复；用 fake inspector 标记 stopped 覆盖 SIGSTOP。
 
-- [ ] **Step 4: 实现 HoldSession signal-to-pipe**
+- [x] **Step 4: 实现 HoldSession signal-to-pipe**
 
 handler 仅 `write()` 信号编号。INT/TERM/HUP/QUIT 统一 release+exit；TSTP release 后恢复默认处理并重发；CONT 通过状态事务校验 generation、安全快照与 owner identity 后恢复。Hold 每 250ms 检查 Lease 是否被 force/safety 撤销。
 
-- [ ] **Step 5: 写 setup 失败测试**
+- [x] **Step 5: 写 setup 失败测试**
 
 断言规则同时包含且只包含两条 pmset 命令，`visudo -cf` 在安装前执行，文件模式为 0440，LaunchAgent label/ProgramArguments/KeepAlive/RunAtLoad 正确；重复 setup 不改变有效内容，损坏 plist/规则会修复；非 root 内部入口拒绝。
 
-- [ ] **Step 6: 实现 setup 与 LaunchAgent**
+- [x] **Step 6: 实现 setup 与 LaunchAgent**
 
 公开 setup 先检查 `/usr/bin/pmset` 和 macOS，再把终端 stdin/stdout/stderr 交给 `/usr/bin/sudo <binary> __root-setup`；root helper 使用安全临时文件、`visudo -cf` 与 `/usr/bin/install`；用户态写 plist 后执行 `launchctl bootout`（忽略未加载）和 `bootstrap`，最后运行 self-check。
 
-- [ ] **Step 7: 实现 lidgo main 的全部命令**
+- [x] **Step 7: 实现 lidgo main 的全部命令**
 
 默认/refresh/switch/config/hold 都先做同一事务 reconcile，再 kickstart agent。配置更新只写 config；创建 Lease 前读取真实安全快照并在不安全时拒绝。隐藏 agent 直接进入 `AgentRuntime.run()`。
 
-- [ ] **Step 8: 完成无 sudo 命令级测试**
+- [x] **Step 8: 完成无 sudo 命令级测试**
 
 使用 `LIDGO_TESTING=1`、临时目录和 fake system adapter；禁止读取或修改真实 `/etc/sudoers.d`、`/var/db`、`~/Library/LaunchAgents` 和真实 `pmset`。
 
-- [ ] **Step 9: 运行 Task 3 验证**
+- [x] **Step 9: 运行 Task 3 验证**
 
 Run: `swift run LidGoCoreTests`
 
@@ -256,7 +256,7 @@ Run: `bash tests/run_tests.sh`
 
 Expected: 全部 0 failures，无真实系统状态变化。
 
-- [ ] **Step 10: 审查并提交 Task 3**
+- [x] **Step 10: 审查并提交 Task 3**
 
 Run: `git diff --check`
 

@@ -59,4 +59,29 @@ runner.run("battery trip latches off", agent.testBatteryTripClearsAllLeasesAndDo
 runner.run("thermal trip latches off", agent.testCriticalThermalTripClearsLeasesPermanently)
 runner.run("unreadable battery fails safe", agent.testUnreadableBatteryFailsSafeAndLatchesOff)
 runner.run("agent fail-safes empty and corrupt state", agent.testEmptyAndCorruptStateFailSafeToSleep)
+
+let command = CommandTests()
+runner.run("command parser accepts public contract", command.testParsesEveryPublicCommandAndAlias)
+runner.run("command parser rejects expanded surface", command.testRejectsOldOrExpandedInterfaces)
+runner.run("status formats timer and hold", command.testStatusFormattingShowsTimerAndHoldTogether)
+runner.run("help exposes only public surface", command.testHelpContainsOnlyPublicSurface)
+
+@MainActor
+func runSetupTest(_ name: String, _ body: @escaping (SetupManagerTests) throws -> Void) {
+    runner.run(name) {
+        let tests = SetupManagerTests()
+        try tests.setUpWithError()
+        defer { try? tests.tearDownWithError() }
+        try body(tests)
+    }
+}
+runSetupTest("sudoers scope is exact", { $0.testSudoersRuleHasExactlyTwoLiteralPmsetCommands() })
+runSetupTest("root setup validates before install", { $0.testRootSetupPlanValidatesBeforeInstalling() })
+runSetupTest("launch agent plist is exact", { try $0.testLaunchAgentPlistUsesExpectedLabelAndInternalAgent() })
+runSetupTest("testing setup is idempotent", { try $0.testTestingSetupIsIdempotentAndNonRootHelperRefuses() })
+runSetupTest("testing setup rejects symlinked lock", { try $0.testTestingSetupRejectsSymlinkedGlobalLockWithoutChangingTarget() })
+
+let hold = HoldSessionTests()
+runner.run("hold begins and releases own lease", hold.testBeginAndReleaseOwnLease)
+runner.run("hold resumes only when safe and current", hold.testResumeRequiresSameGenerationAndSafeConditions)
 runner.finish()

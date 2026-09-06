@@ -147,6 +147,17 @@ final class LeaseCoordinatorTests {
         XCTAssertEqual(tripped.state.lastSafetyStop?.reason, .battery)
         XCTAssertFalse(tripped.tripSafety(reason: .battery, now: now.addingTimeInterval(1)))
         XCTAssertEqual(tripped.state.generation, generation + 1)
+
+        var off = LeaseCoordinator()
+        guard case let .turnedOn(timer) = off.forceToggle(
+            now: now,
+            config: .default,
+            inspect: inspector([:])
+        ) else {
+            return XCTFail("OFF force 应创建 Timer")
+        }
+        XCTAssertEqual(off.state.generation, 1)
+        XCTAssertEqual(timer.generation, 1)
     }
 
     func testSuspendedHoldCanResumeOnlyWithinSameGeneration() {
@@ -168,6 +179,19 @@ final class LeaseCoordinatorTests {
         XCTAssertEqual(
             coordinator.resumeHold(hold, now: now, snapshot: wrongOwner),
             .invalidOwner
+        )
+
+        var safetyDuringSuspend = LeaseCoordinator()
+        let suspended = safetyDuringSuspend.addHold(
+            pid: owner.pid,
+            processStartTime: owner.startTime,
+            now: now
+        )
+        XCTAssertTrue(safetyDuringSuspend.removeHold(id: suspended.id))
+        XCTAssertTrue(safetyDuringSuspend.tripSafety(reason: .thermal, now: now))
+        XCTAssertEqual(
+            safetyDuringSuspend.resumeHold(suspended, now: now, snapshot: owner),
+            .revoked
         )
     }
 }

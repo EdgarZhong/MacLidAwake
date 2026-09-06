@@ -2,6 +2,17 @@ import AppKit
 import Foundation
 import IOKit.ps
 
+private nonisolated(unsafe) var agentSignalWriteFD: Int32 = -1
+
+private func agentSignalHandler(_ signalNumber: Int32) {
+    let savedErrno = errno
+    var byte = UInt8(truncatingIfNeeded: signalNumber)
+    if agentSignalWriteFD >= 0 {
+        _ = Darwin.write(agentSignalWriteFD, &byte, 1)
+    }
+    errno = savedErrno
+}
+
 public struct AgentTickResult: Equatable, Sendable {
     public let hasValidLeases: Bool
     public let stateChanged: Bool
@@ -28,6 +39,9 @@ public final class AgentRuntime: @unchecked Sendable {
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var batterySource: CFRunLoopSource?
+    private var shutdownSource: DispatchSourceRead?
+    private var shutdownReadFD: Int32 = -1
+    private var shutdownWriteFD: Int32 = -1
 
     public init(
         store: StateStore,
@@ -76,6 +90,11 @@ public final class AgentRuntime: @unchecked Sendable {
     }
 
     public func run() -> Never {
+        guard installShutdownHandling() else {
+            try? powerController.setAwake(false)
+            FileHandle.standardError.write(Data("lidgo agent: 无法安装退出信号处理\n".utf8))
+            exit(1)
+        }
         performTick()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.performTick()
@@ -108,6 +127,7 @@ public final class AgentRuntime: @unchecked Sendable {
 
         CFRunLoopRun()
         try? powerController.setAwake(false)
+        closeShutdownHandling()
         exit(0)
     }
 
@@ -118,6 +138,7 @@ public final class AgentRuntime: @unchecked Sendable {
         if let batterySource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), batterySource, .defaultMode)
         }
+        closeShutdownHandling()
     }
 
     private func performTick() {
@@ -126,6 +147,50 @@ public final class AgentRuntime: @unchecked Sendable {
         } catch {
             let message = "lidgo agent: \(error)\n"
             FileHandle.standardError.write(Data(message.utf8))
+        }
+    }
+
+    private func installShutdownHandling() -> Bool {
+        var descriptors: [Int32] = [-1, -1]
+        guard pipe(&descriptors) == 0 else { return false }
+        shutdownReadFD = descriptors[0]
+        shutdownWriteFD = descriptors[1]
+        _ = fcntl(shutdownReadFD, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(shutdownWriteFD, F_SETFD, FD_CLOEXEC)
+        let flags = fcntl(shutdownWriteFD, F_GETFL)
+        if flags >= 0 { _ = fcntl(shutdownWriteFD, F_SETFL, flags | O_NONBLOCK) }
+        agentSignalWriteFD = shutdownWriteFD
+
+        for signalNumber in [SIGINT, SIGTERM, SIGHUP, SIGQUIT] {
+            _ = Darwin.signal(signalNumber, agentSignalHandler)
+        }
+
+        let source = DispatchSource.makeReadSource(
+            fileDescriptor: shutdownReadFD,
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            var bytes = [UInt8](repeating: 0, count: 16)
+            _ = Darwin.read(self.shutdownReadFD, &bytes, bytes.count)
+            CFRunLoopStop(CFRunLoopGetMain())
+        }
+        shutdownSource = source
+        source.resume()
+        return true
+    }
+
+    private func closeShutdownHandling() {
+        shutdownSource?.cancel()
+        shutdownSource = nil
+        if agentSignalWriteFD == shutdownWriteFD { agentSignalWriteFD = -1 }
+        if shutdownReadFD >= 0 {
+            close(shutdownReadFD)
+            shutdownReadFD = -1
+        }
+        if shutdownWriteFD >= 0 {
+            close(shutdownWriteFD)
+            shutdownWriteFD = -1
         }
     }
 }

@@ -96,11 +96,13 @@ struct RuntimeState: Codable, Equatable {
 HoldSession 在创建 Lease 之前安装 handler。handler 只向非阻塞 pipe 写入信号编号；状态修改、pmset 触发和进程退出全部回到串行 run loop：
 
 - INT/TERM/HUP/QUIT：释放自身 Lease并退出。
-- TSTP：释放自身 Lease，临时恢复 SIGTSTP 默认处理并向自身重发；继续运行后恢复 handler。
+- TSTP：释放自身 Lease 后向自身发送不可忽略的 SIGSTOP；这在非交互或 orphaned process group 中也能确定进入 stopped，继续运行后仍由 CONT 路径恢复。
 - CONT：读取同一 Hold 的 generation；未被强制撤销且安全时重新登记，否则退出无效 Hold。
 - STOP：无法捕获，由 AgentRuntime 的进程状态复核移除；CONT 后仍通过 generation 与安全检查。
 
 Hold 同时轮询自己的 Lease 是否仍存在。force 或 safety 清理后，它会明确提示撤销并退出，不会自动抢回。
+
+Agent 也在启动 tick 前安装独立 signal-to-pipe，INT/TERM/HUP/QUIT 返回主 run loop 后先执行 OFF 协调再退出，避免 launchd 重载或用户退出时遗留全局防睡眠状态。
 
 ## sudoers 与 setup 事务
 

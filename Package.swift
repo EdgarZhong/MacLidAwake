@@ -7,6 +7,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "LidGoCore", targets: ["LidGoCore"]),
+        .executable(name: "lidgo", targets: ["lidgo"]),
     ],
     targets: [
         .target(
@@ -15,6 +16,10 @@ let package = Package(
                 .linkedFramework("AppKit"),
                 .linkedFramework("IOKit"),
             ]
+        ),
+        .executableTarget(
+            name: "lidgo",
+            dependencies: ["LidGoCore"]
         ),
         .executableTarget(
             name: "LidGoCoreTests",

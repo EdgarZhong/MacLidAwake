@@ -36,14 +36,14 @@ func XCTAssertFalse(
 
 @MainActor
 func XCTAssertEqual<T: Equatable>(
-    _ actual: @autoclosure () -> T,
-    _ expected: @autoclosure () -> T,
+    _ actual: @autoclosure () throws -> T,
+    _ expected: @autoclosure () throws -> T,
     _ message: String = "",
     file: StaticString = #filePath,
     line: UInt = #line
-) {
-    let actualValue = actual()
-    let expectedValue = expected()
+) rethrows {
+    let actualValue = try actual()
+    let expectedValue = try expected()
     guard actualValue == expectedValue else {
         let detail = message.isEmpty ? "期望 \(expectedValue)，实际 \(actualValue)" : message
         TestRecorder.shared.record(detail, file: file, line: line)

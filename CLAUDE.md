@@ -27,7 +27,7 @@
 
 - [x] 阶段 1：建立 Swift Package、配置/Lease 模型、原子状态仓库和纯状态机测试（14 tests passed；Release warnings-as-errors 构建通过）。
 - [x] 阶段 2：实现进程身份、pmset 协调、常驻 LaunchAgent 监督器、Timer 到期和 Battery/Thermal 熔断（26 tests passed；Release warnings-as-errors 构建通过）。
-- [ ] 阶段 3：实现公开 CLI、Hold 信号语义、setup/自检与命令级测试。
+- [x] 阶段 3：实现公开 CLI、Hold 信号语义、setup/自检与命令级测试（37 tests passed；16 command scenarios passed；Release warnings-as-errors 构建通过）。
 - [ ] 阶段 4：完成命名迁移、README/docs/打包/CI/补全、归档死代码并做最终用户级验收。
 - [ ] 阶段 5：确认 GitHub visibility，创建 `EdgarZhong/MacLidAwake`、设置简介/topics、替换 origin 并推送。
 
@@ -39,6 +39,8 @@
 - launchd 以 `com.maclidawake.lidgo.agent` 常驻监督器维持 Timer，清理过期/stale Hold，并负责实际 `pmset` 协调。
 - runtime state 包含 `schemaVersion`、`generation`、可选 Timer、Hold 列表和最近安全停止原因。
 - Hold 使用 UUID + PID + 进程启动时间验证身份；监督器轮询进程状态以识别 SIGSTOP。
+- SIGTSTP handler 先原子释放自身 Lease，再向自身发送不可忽略的 SIGSTOP；这避免非交互/orphaned process group 忽略 job-control stop，SIGCONT 仍走 generation、owner 与安全复核。
+- Agent 自身也通过 signal-to-pipe 处理 INT/TERM/HUP/QUIT，在 launchd 重载或退出前先将本用户电源目标恢复为 OFF。
 - 强制关闭和安全熔断清空 Lease 并递增 generation；普通 Hold 停止/死亡不递增，以允许同一前台进程在 SIGCONT 后有条件恢复。
 - Thermal 固定采用上游默认的 critical 门槛，不提供关闭入口；Battery 在电量小于等于配置阈值时触发，恢复条件不会自动重建 Lease。
 - 测试通过注入的目录、时钟、进程检查器和 pmset fake 覆盖全路径，不触碰当前外部 `SleepDisabled=1`。

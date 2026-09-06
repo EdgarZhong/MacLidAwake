@@ -154,6 +154,7 @@ public struct LeaseCoordinator {
             state.generation &+= 1
             return .turnedOff
         }
+        state.generation &+= 1
         let timer = TimerLease(
             now: now,
             duration: config.defaultDurationSeconds,
@@ -166,7 +167,9 @@ public struct LeaseCoordinator {
 
     @discardableResult
     public mutating func tripSafety(reason: SafetyStopReason, now: Date) -> Bool {
-        guard hasValidLeases else { return false }
+        if let previous = state.lastSafetyStop, previous.reason == reason {
+            return false
+        }
         state.timer = nil
         state.holds.removeAll()
         state.generation &+= 1
