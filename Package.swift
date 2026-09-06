@@ -9,7 +9,13 @@ let package = Package(
         .library(name: "LidGoCore", targets: ["LidGoCore"]),
     ],
     targets: [
-        .target(name: "LidGoCore"),
+        .target(
+            name: "LidGoCore",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("IOKit"),
+            ]
+        ),
         .executableTarget(
             name: "LidGoCoreTests",
             dependencies: ["LidGoCore"],

@@ -146,11 +146,11 @@ Commit: `feat: add lease state core`
 - Produces: `SafetyReading.snapshot() -> SafetySnapshot`。
 - Produces: `AgentRuntime.tick()` 与 `AgentRuntime.run()`。
 
-- [ ] **Step 1: 写进程身份与状态失败测试**
+- [x] **Step 1: 写进程身份与状态失败测试**
 
 使用当前测试进程断言 snapshot 存在、start identity 非零、状态可运行；使用完成的子进程断言 dead；通过 fake snapshot 断言 stopped/zombie 和 start identity 不符均被 coordinator 清除。
 
-- [ ] **Step 2: 实现 ProcessInspector**
+- [x] **Step 2: 实现 ProcessInspector**
 
 ```swift
 let size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info,
@@ -159,7 +159,7 @@ let size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info,
 
 将 `pbi_start_tvsec` 与 `pbi_start_tvusec` 组合为稳定 `UInt64`；`SRUN`/`SSLEEP` 有效，`SSTOP`/`SZOMB` 无效，未知或读取失败按无效处理。
 
-- [ ] **Step 3: 写 PowerController 失败测试**
+- [x] **Step 3: 写 PowerController 失败测试**
 
 fake runner 必须只收到：
 
@@ -170,25 +170,25 @@ fake runner 必须只收到：
 
 测试多次相同目标不重复调用、多个监督器共享锁时其中一个释放不执行 0、最后一个释放才执行 0、缺失/符号链接全局锁拒绝运行。
 
-- [ ] **Step 4: 实现 PowerController**
+- [x] **Step 4: 实现 PowerController**
 
 只允许 root setup 创建 `0660 root:admin` 的 `/var/db/maclidawake.lock`；监督器 `open(O_RDWR|O_NOFOLLOW)`。awake 时取得共享锁后 `pmset 1`；sleep 时释放共享锁并在取得排他锁后 `pmset 0`。
 
-- [ ] **Step 5: 写 AgentRuntime 失败测试**
+- [x] **Step 5: 写 AgentRuntime 失败测试**
 
 测试 Timer 到期、Timer 到期仍有 Hold、SIGSTOP 模拟、PID reuse、Battery 等于阈值、Thermal critical、熔断后电量/温度恢复不自动开启、空 Lease 启动执行 fail-safe 0、损坏 state 执行 fail-safe 0、wake 重新 reconcile。
 
-- [ ] **Step 6: 实现 SafetyMonitor 与 AgentRuntime**
+- [x] **Step 6: 实现 SafetyMonitor 与 AgentRuntime**
 
 Agent 每 1 秒 tick，并由 IOPS、thermal 与 wake 通知提前触发。每次 tick 在状态锁内清理/熔断，解锁后根据 `hasValidLeases` 调用 PowerController；所有回调汇入同一串行队列。
 
-- [ ] **Step 7: 运行 Task 2 全部测试**
+- [x] **Step 7: 运行 Task 2 全部测试**
 
 Run: `swift run LidGoCoreTests`
 
 Expected: 全部 0 failures。
 
-- [ ] **Step 8: 审查并提交 Task 2**
+- [x] **Step 8: 审查并提交 Task 2**
 
 Run: `git diff --check`
 

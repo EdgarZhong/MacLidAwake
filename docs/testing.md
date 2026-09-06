@@ -19,7 +19,7 @@ swift run LidGoCoreTests
 - Timer + Hold、多 Hold、独立释放、Timer 到期。
 - force 清理、generation 撤销、Hold 恢复条件。
 - dead、stopped、zombie、PID reuse 清理。
-- Battery/Thermal 全局熔断与不自动恢复。
+- Battery/Thermal 全局熔断、电池状态不可读 fail-safe 与不自动恢复。
 - 损坏/残留状态 fail-safe、原子写入与并发事务。
 - sudoers 文本精确范围和 LaunchAgent plist 内容。
 

@@ -97,6 +97,7 @@ public struct HoldLease: Codable, Equatable, Sendable {
 
 public enum SafetyStopReason: String, Codable, Equatable, Sendable {
     case battery
+    case batteryUnavailable
     case thermal
 }
 

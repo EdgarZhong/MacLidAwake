@@ -26,7 +26,7 @@
 ## 本轮任务看板
 
 - [x] 阶段 1：建立 Swift Package、配置/Lease 模型、原子状态仓库和纯状态机测试（14 tests passed；Release warnings-as-errors 构建通过）。
-- [ ] 阶段 2：实现进程身份、pmset 协调、常驻 LaunchAgent 监督器、Timer 到期和 Battery/Thermal 熔断。
+- [x] 阶段 2：实现进程身份、pmset 协调、常驻 LaunchAgent 监督器、Timer 到期和 Battery/Thermal 熔断（26 tests passed；Release warnings-as-errors 构建通过）。
 - [ ] 阶段 3：实现公开 CLI、Hold 信号语义、setup/自检与命令级测试。
 - [ ] 阶段 4：完成命名迁移、README/docs/打包/CI/补全、归档死代码并做最终用户级验收。
 - [ ] 阶段 5：确认 GitHub visibility，创建 `EdgarZhong/MacLidAwake`、设置简介/topics、替换 origin 并推送。
@@ -35,6 +35,7 @@
 
 - 同一用户的运行状态存放在 `~/Library/Application Support/MacLidAwake/`，文件锁保护所有读改写事务。
 - root 预置的全局参与锁采用 `0660 root:admin`，不沿用上游过宽的 `0666`。
+- 电池状态无法读取时按 fail-safe 安全熔断处理，并记录 `batteryUnavailable`；不会因恢复可读而自动重建 Lease。
 - launchd 以 `com.maclidawake.lidgo.agent` 常驻监督器维持 Timer，清理过期/stale Hold，并负责实际 `pmset` 协调。
 - runtime state 包含 `schemaVersion`、`generation`、可选 Timer、Hold 列表和最近安全停止原因。
 - Hold 使用 UUID + PID + 进程启动时间验证身份；监督器轮询进程状态以识别 SIGSTOP。

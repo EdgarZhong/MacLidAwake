@@ -102,6 +102,16 @@ func XCTFail(
 }
 
 @MainActor
+func waitUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+        if condition() { return true }
+        Thread.sleep(forTimeInterval: 0.02)
+    } while Date() < deadline
+    return condition()
+}
+
+@MainActor
 final class TestRunner {
     private var testFailures = 0
     private var testPasses = 0

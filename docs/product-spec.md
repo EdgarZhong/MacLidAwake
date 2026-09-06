@@ -94,7 +94,7 @@ sudoers 只授权：
 
 规则安装前使用 `/usr/sbin/visudo -cf`，最终文件为 `0440 root:wheel`。普通运行使用 `sudo -n`，不保存或注入任何认证凭据。
 
-Battery ≤ cutoff 或 thermal pressure 达到 critical 时：
+Battery ≤ cutoff、MacBook 电池状态无法读取或 thermal pressure 达到 critical 时：
 
 1. 清除全部 Timer/Hold Lease。
 2. 递增 generation。

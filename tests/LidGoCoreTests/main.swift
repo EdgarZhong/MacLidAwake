@@ -33,4 +33,30 @@ runStateStoreTest(runner, "state persists privately") { try $0.testPersistsConfi
 runStateStoreTest(runner, "state transactions serialize") { try $0.testSerializesConcurrentTransactions() }
 runStateStoreTest(runner, "corrupt state recovers fail-safe") { try $0.testCorruptRuntimeIsQuarantinedAndRecoveredAsEmpty() }
 runStateStoreTest(runner, "symlinked state directory is rejected") { try $0.testRejectsSymlinkedStateDirectory() }
+
+let processInspector = ProcessInspectorTests()
+runner.run("process inspector reads identity", processInspector.testReadsCurrentProcessIdentity)
+runner.run("process inspector detects stopped and dead", processInspector.testDetectsStoppedAndDeadChild)
+
+@MainActor
+func runPowerTest(_ name: String, _ body: @escaping (PowerControllerTests) throws -> Void) {
+    runner.run(name) {
+        let tests = PowerControllerTests()
+        try tests.setUpWithError()
+        defer { try? tests.tearDownWithError() }
+        try body(tests)
+    }
+}
+runPowerTest("power uses exact commands", { try $0.testUsesOnlyExactWhitelistedCommandsAndDeduplicatesTargets() })
+runPowerTest("power clears only for last participant", { try $0.testOnlyLastParticipantClearsGlobalHold() })
+runPowerTest("power rejects unsafe locks", { try $0.testMissingOrSymlinkedGlobalLockIsRejected() })
+runPowerTest("power retries failed commands", { try $0.testFailedCommandDoesNotPoisonRetryState() })
+
+let agent = AgentRuntimeTests()
+runner.run("agent expires timer but preserves hold", agent.testTimerExpiresWhileLiveHoldRemainsActive)
+runner.run("agent rejects stopped and reused owners", agent.testStoppedOrReusedProcessCannotKeepAwake)
+runner.run("battery trip latches off", agent.testBatteryTripClearsAllLeasesAndDoesNotAutoResume)
+runner.run("thermal trip latches off", agent.testCriticalThermalTripClearsLeasesPermanently)
+runner.run("unreadable battery fails safe", agent.testUnreadableBatteryFailsSafeAndLatchesOff)
+runner.run("agent fail-safes empty and corrupt state", agent.testEmptyAndCorruptStateFailSafeToSleep)
 runner.finish()

@@ -124,6 +124,7 @@ Hold 同时轮询自己的 Lease 是否仍存在。force 或 safety 清理后，
 `SafetyMonitor` 返回电量百分比与 thermal state。AgentRuntime 每次启动、定时 tick、电池/thermal 通知和 wake 时评估：
 
 - battery `<= configured cutoff`：`trip(.battery)`。
+- MacBook 电池状态无法读取：`trip(.batteryUnavailable)`，按“无法确认时优先恢复睡眠”处理。
 - thermal `.critical`：`trip(.thermal)`。
 
 `trip` 在状态事务中清空全部 Lease、递增 generation、记录原因；事务完成后 PowerController 释放参与锁并恢复睡眠。后续安全恢复只更新观察结果，不创建 Lease。
