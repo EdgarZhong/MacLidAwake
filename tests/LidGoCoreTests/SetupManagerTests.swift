@@ -47,6 +47,20 @@ final class SetupManagerTests {
         ])
     }
 
+    func testGeneratedRulePassesRealVisudoAndGarbageFails() throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let valid = root.appendingPathComponent("valid.sudoers")
+        let invalid = root.appendingPathComponent("invalid.sudoers")
+        try SetupManager.sudoersRuleText.write(to: valid, atomically: true, encoding: .utf8)
+        try "this is not valid sudoers\n".write(to: invalid, atomically: true, encoding: .utf8)
+
+        let runner = ProcessCommandRunner()
+        let validResult = runner.run(executable: "/usr/sbin/visudo", arguments: ["-cf", valid.path])
+        let invalidResult = runner.run(executable: "/usr/sbin/visudo", arguments: ["-cf", invalid.path])
+        XCTAssertEqual(validResult.status, 0, validResult.output)
+        XCTAssertFalse(invalidResult.status == 0, "visudo 不应接受损坏规则")
+    }
+
     func testLaunchAgentPlistUsesExpectedLabelAndInternalAgent() throws {
         let manager = SetupManager(
             paths: paths,

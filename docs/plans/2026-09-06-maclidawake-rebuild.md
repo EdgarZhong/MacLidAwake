@@ -283,15 +283,15 @@ Commit: `feat: implement lidgo commands and setup`
 - Consumes: 完整 `lidgo` 实现和全部测试证据。
 - Produces: 稳定 README 入口、发布构建、completion、CI、Homebrew Formula 和逐路径验收记录。
 
-- [ ] **Step 1: 写构建/CI/Formula/completion**
+- [x] **Step 1: 写构建/CI/Formula/completion**
 
 `scripts/build.sh` 运行 `swift build -c release`；CI 使用 macOS runner 执行 `swift run LidGoCoreTests`、命令级测试和 release build；Formula 从 `EdgarZhong/MacLidAwake` release source 构建并安装 `lidgo` 与 zsh completion，测试 `lidgo help`。在首个 tag 前 Formula 明确作为发布模板，不宣称可安装的已发布版本。
 
-- [ ] **Step 2: 归档旧产品死代码**
+- [x] **Step 2: 归档旧产品死代码**
 
 先把 `.archive/` 加入 `.gitignore`，再将 `cli/keepawake/` 与 `experiments/` 移入 `.archive/upstream-keepawake/`，确保 Git 不跟踪归档内容。保留 `LICENSE`，README 保留 upstream attribution。
 
-- [ ] **Step 3: 重写 README 与文档索引**
+- [x] **Step 3: 重写 README 与文档索引**
 
 README 首屏必须出现 `MacLidAwake`、`CLI: lidgo` 和句子：
 
@@ -301,7 +301,7 @@ Temporarily keep a MacBook running with the lid closed, then automatically resto
 
 README 记录稳定安装/使用、安全摘要、目录、开发命令、限制和 docs 索引，不放动态任务看板。
 
-- [ ] **Step 4: 运行完整自动验证**
+- [x] **Step 4: 运行完整自动验证**
 
 Run: `swift run LidGoCoreTests`
 
@@ -315,7 +315,7 @@ Run: `rg -n "keepawake|caffeinate|CGVirtualDisplay" Sources Tests tests scripts 
 
 Expected: 测试/构建 0 failures；搜索只剩合法 attribution 或历史说明。
 
-- [ ] **Step 5: 按用户行为路径写入并执行验收记录**
+- [x] **Step 5: 按用户行为路径写入并执行验收记录**
 
 在 `docs/autonomous-runs/YYYYMMDD-HHmm-maclidawake.md` 枚举默认 Timer、幂等、refresh、Hold、多 Hold、四个清理信号、TSTP/CONT、模拟 STOP、Timer+Hold、force、Battery、Thermal、stale、setup、help/config。每项记录预期、命令、结果和 PASS/SKIP；物理合盖、真实 cutoff、真实 sudo 明确标为未执行或需用户确认。
 

@@ -77,6 +77,7 @@ func runSetupTest(_ name: String, _ body: @escaping (SetupManagerTests) throws -
 }
 runSetupTest("sudoers scope is exact", { $0.testSudoersRuleHasExactlyTwoLiteralPmsetCommands() })
 runSetupTest("root setup validates before install", { $0.testRootSetupPlanValidatesBeforeInstalling() })
+runSetupTest("generated sudoers passes real visudo", { try $0.testGeneratedRulePassesRealVisudoAndGarbageFails() })
 runSetupTest("launch agent plist is exact", { try $0.testLaunchAgentPlistUsesExpectedLabelAndInternalAgent() })
 runSetupTest("testing setup is idempotent", { try $0.testTestingSetupIsIdempotentAndNonRootHelperRefuses() })
 runSetupTest("testing setup rejects symlinked lock", { try $0.testTestingSetupRejectsSymlinkedGlobalLockWithoutChangingTarget() })

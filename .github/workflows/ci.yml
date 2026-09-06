@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Unit tests
+        run: swift run LidGoCoreTests
+      - name: Build CLI
+        run: swift build --product lidgo
+      - name: Command tests
+        run: bash tests/run_tests.sh
+      - name: Release build without warnings
+        run: swift build -c release -Xswiftc -warnings-as-errors

@@ -22,6 +22,8 @@ swift run LidGoCoreTests
 - Battery/Thermal 全局熔断、电池状态不可读 fail-safe 与不自动恢复。
 - 损坏/残留状态 fail-safe、原子写入与并发事务。
 - sudoers 文本精确范围和 LaunchAgent plist 内容。
+- 生成规则通过真实 `/usr/sbin/visudo -cf`，且损坏规则被拒绝。
+- setup 的 `O_NOFOLLOW`、文件模式、幂等写入与损坏 plist 修复。
 
 ### 命令级测试
 
@@ -31,15 +33,19 @@ swift run LidGoCoreTests
 bash tests/run_tests.sh
 ```
 
-测试设置 `LIDGO_TESTING=1` 并使用临时 Application Support、fake pmset、fake launchctl 和可控安全/进程快照；不得访问 `/etc/sudoers.d`、`/var/db` 或改变真实 `SleepDisabled`。
+测试设置 `LIDGO_TESTING=1` 并使用临时 Application Support、fake 电源控制器、跳过 launchctl 与可控安全读数；Hold 身份仍由真实 `proc_pidinfo` 验证。测试不得访问 `/etc/sudoers.d`、`/var/db` 或改变真实 `SleepDisabled`。
 
-覆盖公开命令输出、非法参数无副作用、Timer 幂等/refresh、switch force、config、多个前台 Hold、SIGINT/SIGTERM/SIGHUP/SIGQUIT、SIGTSTP/SIGCONT、模拟 SIGSTOP 监督、agent 到期和安全熔断。
+覆盖公开命令输出、非法参数无副作用、setup 幂等/修复、Timer 幂等/refresh、config 不改变现有 deadline、无 force switch、refresh+Hold 拒绝、Timer+Hold、多 Hold、force 撤销、crash stale 清理、SIGINT/SIGTERM/SIGHUP/SIGQUIT、SIGTSTP/SIGCONT、SIGSTOP 监督、Agent 退出清理，以及 Battery/Battery unavailable/Thermal 熔断后保持 OFF。
 
 ### 构建与静态检查
 
 ```bash
-swift build -c release
-rg -n "keepawake|caffeinate|CGVirtualDisplay|status| on | off " Sources Tests tests README.md docs --glob '!docs/archived/**'
+swift build -c release -Xswiftc -warnings-as-errors
+bash -n scripts/build.sh
+bash -n tests/run_tests.sh
+zsh -n completions/_lidgo
+ruby -c Formula/maclidawake.rb
+rg -n "keepawake|caffeinate|CGVirtualDisplay|status| on | off " Sources tests scripts completions Formula README.md docs --glob '!docs/archived/**'
 git diff --check
 ```
 
@@ -65,3 +71,4 @@ git diff --check
 - 自动测试通过不等于“绝对安全”。
 - 测试日志必须区分 PASS、SKIP 和未执行的硬件路径。
 - 如果测试开始时发现外部 `SleepDisabled=1`，不得擅自清除；真实系统测试应停止并要求用户确认来源。
+- `LIDGO_TESTING=1` 只证明隔离适配器与真实进程信号路径，不得作为真实 pmset、sudoers、launchd 或合盖硬件验收证据。
