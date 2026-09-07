@@ -4,7 +4,7 @@
 
 在现有 `ecc521/keepawake` clone 上完成 MacLidAwake 重构，交付公开命令 `lidgo`，保留成熟的最小权限模型，并实现持久 Timer Lease、并发 Hold Lease、安全熔断、异常恢复和完整测试。
 
-次要目标：把 CLI 与本机默认配置统一为 Timer 60 分钟、Battery cutoff 10%，随后完成真实 `lidgo setup` 与安全冒烟验收。2026-09-07 用户重新授权 GitHub 公开发布，发布流程已随 v0.1.0 完成。
+次要目标：把 CLI 与本机默认配置统一为 Timer 60 分钟、Battery cutoff 10%，随后完成真实 `lidgo setup` 与安全冒烟验收。2026-09-07 用户重新授权 GitHub 公开发布，发布流程已随 v1.0.0 完成（Release 工作流第二次运行成功，已产出 tarball+sha256 并回提 Formula；main 上排队不前的 CI 运行按用户指示取消，不再纠缠）。
 
 ## 已确认执行口径
 
@@ -35,7 +35,7 @@
 - [x] 阶段 3：实现公开 CLI、Hold 信号语义、setup/自检与命令级测试（37 tests passed；16 command scenarios passed；Release warnings-as-errors 构建通过）。
 - [x] 阶段 4：完成命名迁移、README/docs/打包/CI/补全、归档死代码并做最终用户级验收（38 tests passed；28 command scenarios passed；Release/build/Formula/style/static checks passed）。
 - [x] 阶段 5：将 CLI 与本机默认配置统一为 60 分钟/10%，完成真实 setup、Timer/Hold 清理与恢复验收（用户确认本机测试与验证通过）。
-- [x] 阶段 6（2026-09-07 用户重新授权并执行）：CLI 全部用户可见文案英文化（Sources/completions/tests 零残留 CJK）；README 重写为面向用户的双语版本（英文 `README.md` + `README.zh-Hans.md`）；CI 增加 macos-13(Intel)/macos-latest 矩阵；新增 `.github/workflows/release.yml`：tag `v*` 触发，跑测试、构建 arm64+x86_64 universal 二进制、打包 tar.gz + sha256、创建 GitHub Release，并把 `Formula/maclidawake.rb` 重写为指向该 tarball 的二进制 formula 后自动回提 main；创建公开 `EdgarZhong/MacLidAwake` 并推送，首发 tag `v0.1.0`。
+- [x] 阶段 6（2026-09-07 用户重新授权并执行）：CLI 全部用户可见文案英文化（Sources/completions/tests 零残留 CJK）；README 重写为面向用户的双语版本（英文 `README.md` + `README.zh-Hans.md`）；CI 增加 macos-13(Intel)/macos-latest 矩阵；新增 `.github/workflows/release.yml`：tag `v*` 触发，跑测试、构建 arm64+x86_64 universal 二进制、打包 tar.gz + sha256、创建 GitHub Release，并把 `Formula/maclidawake.rb` 重写为指向该 tarball 的二进制 formula 后自动回提 main；创建公开 `EdgarZhong/MacLidAwake` 并推送，首发 tag `v1.0.0`。
 
 ## 关键架构决策
 
