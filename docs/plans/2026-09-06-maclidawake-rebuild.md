@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - 产品名固定为 `MacLidAwake`，公开命令固定为 `lidgo`。
-- 默认时长固定为 60 分钟，Battery cutoff 固定默认为 15%，Thermal safety 固定启用并在 critical 触发。
+- 默认时长固定为 60 分钟，Battery cutoff 固定默认为 10%，Thermal safety 固定启用并在 critical 触发。
 - sudoers 只允许 `/usr/bin/pmset -a disablesleep 1` 和 `/usr/bin/pmset -a disablesleep 0`。
 - 不保存密码、不使用 Keychain、不向 sudo stdin 输入密码；非 setup 特权调用只使用 `sudo -n`。
 - Timer 必须独立于终端，由 `com.maclidawake.lidgo.agent` LaunchAgent 监督。

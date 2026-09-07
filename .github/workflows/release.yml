@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run tests
+        run: |
+          swift run LidGoCoreTests
+          bash tests/run_tests.sh
+
+      - name: Build universal binary
+        run: |
+          swift build -c release --arch arm64 --arch x86_64 -Xswiftc -warnings-as-errors
+          BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+          lipo -info "$BIN_DIR/lidgo"
+          echo "BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
+
+      - name: Package archive
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          STAGE="dist/maclidawake-${TAG}-macos"
+          mkdir -p "$STAGE"
+          cp "$BIN_DIR/lidgo" "$STAGE/lidgo"
+          cp completions/_lidgo LICENSE "$STAGE/"
+          tar -czf "maclidawake-${TAG}-macos.tar.gz" -C dist "maclidawake-${TAG}-macos"
+          shasum -a 256 "maclidawake-${TAG}-macos.tar.gz" | tee "maclidawake-${TAG}-macos.tar.gz.sha256"
+
+      - name: Create GitHub release
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release create "$TAG" \
+            --title "MacLidAwake $TAG" \
+            --generate-notes \
+            "maclidawake-${TAG}-macos.tar.gz" \
+            "maclidawake-${TAG}-macos.tar.gz.sha256"
+
+      - name: Update Homebrew formula
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          SHA="$(cut -d' ' -f1 "maclidawake-${TAG}-macos.tar.gz.sha256")"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/maclidawake-${TAG}-macos.tar.gz"
+          cat > Formula/maclidawake.rb <<EOF
+          class Maclidawake < Formula
+            desc "Keep a closed-lid MacBook running temporarily, then restore sleep"
+            homepage "https://github.com/${GITHUB_REPOSITORY}"
+            license "MIT"
+
+            url "${URL}"
+            sha256 "${SHA}"
+
+            depends_on macos: :ventura
+
+            def install
+              bin.install "lidgo"
+              zsh_completion.install "_lidgo"
+            end
+
+            test do
+              assert_match "MacLidAwake", shell_output("#{bin}/lidgo help")
+            end
+          end
+          EOF
+          ruby -e 'puts File.read("Formula/maclidawake.rb")'
+
+      - name: Commit formula update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/maclidawake.rb
+          git commit -m "chore: point Homebrew formula at ${GITHUB_REF_NAME} release"
+          git push origin HEAD:main

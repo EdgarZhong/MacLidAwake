@@ -16,6 +16,14 @@ final class CommandTests {
             try LidGoCommand.parse(["config", "--duration", "1h30m", "--battery", "20"]),
             .config(ConfigUpdate(defaultDurationSeconds: 5_400, batteryCutoffPercent: 20))
         )
+        try XCTAssertEqual(
+            try LidGoCommand.parse(["config", "--duration", "45"]),
+            .config(ConfigUpdate(defaultDurationSeconds: 2_700))
+        )
+        try XCTAssertEqual(
+            try LidGoCommand.parse(["config", "-d", "45", "-b", "20"]),
+            .config(ConfigUpdate(defaultDurationSeconds: 2_700, batteryCutoffPercent: 20))
+        )
         try XCTAssertEqual(try LidGoCommand.parse(["setup"]), .setup)
         try XCTAssertEqual(try LidGoCommand.parse(["help"]), .help)
         try XCTAssertEqual(try LidGoCommand.parse(["-h"]), .help)
@@ -29,9 +37,13 @@ final class CommandTests {
             ["-disu"], ["switch", "-x"], ["config", "--battery", "0"],
             ["config", "--battery", "100"], ["config", "--duration", "0m"],
             ["config", "--duration", "1h", "--duration", "2h"],
+            ["config", "-d", "1h", "--duration", "2h"],
+            ["config", "--duration", "1h", "-d", "2h"],
+            ["config", "-b", "10", "--battery", "20"],
+            ["config", "--battery", "10", "-b", "20"],
         ]
         for arguments in invalidArguments {
-            XCTAssertThrowsError(try LidGoCommand.parse(arguments), "应拒绝 \(arguments)")
+            XCTAssertThrowsError(try LidGoCommand.parse(arguments), "Should reject \(arguments)")
         }
     }
 
@@ -43,18 +55,21 @@ final class CommandTests {
             now: now,
             timeZone: TimeZone(secondsFromGMT: 0)!
         )
-        XCTAssertTrue(output.contains("LidGo 已开启"))
-        XCTAssertTrue(output.contains("Timer：剩余 60 分钟"))
-        XCTAssertTrue(output.contains("Hold：2 个终端会话正在维持"))
+        XCTAssertTrue(output.contains("LidGo on"))
+        XCTAssertTrue(output.contains("Timer: 60 min remaining"))
+        XCTAssertTrue(output.contains("Hold: 2 terminal session(s) holding"))
     }
 
     func testHelpContainsOnlyPublicSurface() {
         let help = StatusFormatter.help
-        for expected in ["lidgo --hold", "lidgo -r, --refresh", "lidgo switch -f", "lidgo config", "lidgo setup"] {
-            XCTAssertTrue(help.contains(expected), "帮助缺少 \(expected)")
+        for expected in [
+            "lidgo --hold", "lidgo -r, --refresh", "lidgo switch -f",
+            "lidgo config -d 45", "lidgo config -b 10", "lidgo setup",
+        ] {
+            XCTAssertTrue(help.contains(expected), "Help is missing \(expected)")
         }
         for forbidden in [" status", " on", " off", " security", " install", " uninstall", "--release", "-t ", "-w ", "caffeinate"] {
-            XCTAssertFalse(help.contains(forbidden), "帮助不应包含 \(forbidden)")
+            XCTAssertFalse(help.contains(forbidden), "Help must not contain \(forbidden)")
         }
     }
 }

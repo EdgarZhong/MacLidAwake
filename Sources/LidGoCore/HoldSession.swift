@@ -11,7 +11,7 @@ public enum AgentNotifierError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case let .commandFailed(result):
-            return "无法唤醒 LidGo agent（\(result.status)）：\(result.output)；请运行 lidgo setup"
+            return "Cannot wake the LidGo agent (\(result.status)): \(result.output); run lidgo setup"
         }
     }
 }
@@ -51,13 +51,13 @@ public enum HoldSessionError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case let .cannotCreateSignalPipe(code):
-            return "无法创建信号管道：\(String(cString: strerror(code)))"
+            return "Cannot create signal pipe: \(String(cString: strerror(code)))"
         case .invalidOwner:
-            return "无法验证当前 Hold 进程身份"
+            return "Cannot verify the identity of the current Hold process"
         case let .unsafe(reason):
-            return "安全条件不允许开启 Hold：\(reason.rawValue)"
+            return "Safety conditions do not allow starting a Hold: \(reason.rawValue)"
         case .notStarted:
-            return "Hold 尚未开始"
+            return "Hold has not started"
         }
     }
 }
@@ -187,8 +187,8 @@ public final class HoldSession: @unchecked Sendable {
     public func run() throws -> Int32 {
         try installSignalPipe()
         _ = try begin()
-        print("LidGo Hold 已开启")
-        print("按 Ctrl-C 结束")
+        print("LidGo Hold started")
+        print("Press Ctrl-C to end")
         fflush(stdout)
         defer { try? release() }
 
@@ -215,7 +215,7 @@ public final class HoldSession: @unchecked Sendable {
                 continue
             }
             if try leaseWasRevoked() {
-                print("LidGo Hold 已被全局撤销")
+                print("LidGo Hold was globally revoked")
                 return 0
             }
         }
@@ -240,12 +240,12 @@ public final class HoldSession: @unchecked Sendable {
     private func restoreAfterContinue() throws -> Int32? {
         switch try resume() {
         case .resumed:
-            print("LidGo Hold 已恢复")
+            print("LidGo Hold resumed")
             return nil
         case .alreadyActive:
             return nil
         case .revoked:
-            print("LidGo Hold 已被全局撤销，无法恢复")
+            print("LidGo Hold was globally revoked and cannot resume")
             return 0
         case .invalidOwner:
             throw HoldSessionError.invalidOwner

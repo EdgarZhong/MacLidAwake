@@ -13,6 +13,14 @@ public struct CommandResult: Equatable, Sendable {
 
 public protocol CommandRunning: Sendable {
     func run(executable: String, arguments: [String]) -> CommandResult
+    func runInteractively(executable: String, arguments: [String]) -> CommandResult
+}
+
+public extension CommandRunning {
+    /// Test doubles may record an interactive command through their normal command path.
+    func runInteractively(executable: String, arguments: [String]) -> CommandResult {
+        run(executable: executable, arguments: arguments)
+    }
 }
 
 public final class ProcessCommandRunner: CommandRunning, @unchecked Sendable {
@@ -37,6 +45,60 @@ public final class ProcessCommandRunner: CommandRunning, @unchecked Sendable {
             output: String(data: data, encoding: .utf8) ?? ""
         )
     }
+
+    /// Runs a command attached directly to the current terminal for secure prompts.
+    public func runInteractively(executable: String, arguments: [String]) -> CommandResult {
+        var argumentStorage = ([executable] + arguments).map { strdup($0) }
+        argumentStorage.append(nil)
+        defer {
+            for pointer in argumentStorage {
+                free(pointer)
+            }
+        }
+
+        var childPID: pid_t = 0
+        let spawnStatus = argumentStorage.withUnsafeMutableBufferPointer { buffer in
+            posix_spawn(
+                &childPID,
+                executable,
+                nil,
+                nil,
+                buffer.baseAddress,
+                environ
+            )
+        }
+        guard spawnStatus == 0 else {
+            return CommandResult(
+                status: -1,
+                output: "posix_spawn failed: \(String(cString: strerror(spawnStatus)))"
+            )
+        }
+
+        var waitStatus: Int32 = 0
+        var waitResult: pid_t
+        repeat {
+            waitResult = waitpid(childPID, &waitStatus, 0)
+        } while waitResult == -1 && errno == EINTR
+
+        guard waitResult == childPID else {
+            return CommandResult(
+                status: -1,
+                output: "waitpid failed: \(String(cString: strerror(errno)))"
+            )
+        }
+        return CommandResult(status: Self.decodeWaitStatus(waitStatus), output: "")
+    }
+
+    private static func decodeWaitStatus(_ status: Int32) -> Int32 {
+        let terminatingSignal = status & 0x7f
+        if terminatingSignal == 0 {
+            return (status >> 8) & 0xff
+        }
+        if terminatingSignal != 0x7f {
+            return 128 + terminatingSignal
+        }
+        return status
+    }
 }
 
 public protocol PowerControlling: Sendable {
@@ -52,13 +114,13 @@ public enum PowerControllerError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case let .cannotOpenLock(url, code):
-            return "无法打开全局参与锁 \(url.path)：\(String(cString: strerror(code)))"
+            return "Cannot open global participation lock \(url.path): \(String(cString: strerror(code)))"
         case let .unsafeLock(url):
-            return "全局参与锁不安全：\(url.path)"
+            return "Global participation lock is unsafe: \(url.path)"
         case let .cannotLock(url, code):
-            return "无法取得全局参与锁 \(url.path)：\(String(cString: strerror(code)))"
+            return "Cannot acquire global participation lock \(url.path): \(String(cString: strerror(code)))"
         case let .commandFailed(arguments, result):
-            return "特权命令失败（\(result.status)）：\(arguments.joined(separator: " ")) \(result.output)"
+            return "Privileged command failed (\(result.status)): \(arguments.joined(separator: " ")) \(result.output)"
         }
     }
 }

@@ -4,12 +4,17 @@
 
 在现有 `ecc521/keepawake` clone 上完成 MacLidAwake 重构，交付公开命令 `lidgo`，保留成熟的最小权限模型，并实现持久 Timer Lease、并发 Hold Lease、安全熔断、异常恢复和完整测试。
 
-次要目标：本地验收通过后，使用 GitHub CLI 在账号 `EdgarZhong` 下创建新仓库、填写元数据并推送。仓库 visibility 尚待用户确认，因此不得提前创建。
+次要目标：把 CLI 与本机默认配置统一为 Timer 60 分钟、Battery cutoff 10%，随后完成真实 `lidgo setup` 与安全冒烟验收。2026-09-07 用户重新授权 GitHub 公开发布，发布流程已随 v0.1.0 完成。
 
 ## 已确认执行口径
 
 - 直接在当前 `main` 工作区实现，不创建 worktree。
 - 不再使用子 Agent；实现、审查和验证全部由当前会话串行完成。
+- CLI 内置默认配置与本机配置均固定为 Timer 60 分钟、Battery cutoff 10%。
+- duration 裸整数按分钟解释；显式单位只支持小写 `h`、`m`，不支持 `s`；保留 `1h30m` 组合写法。
+- `lidgo config` 的 duration/battery 同时支持 `-d`/`--duration` 与 `-b`/`--battery`；同一配置项不得重复指定。
+- `lidgo setup` 的首次 sudo 认证必须直接继承终端 stdin/stdout/stderr，并与调用进程保持同一前台进程组，禁止捕获认证提示或密码输入。2026-09-06 真实试装暴露 Foundation `Process` 会新建后台进程组，造成密码回显并停止；现已改用默认属性的 `posix_spawn`，PGID 回归测试与假口令无回显测试通过，真实 sudo 复验待完成。
+- 当前优先完成公开发布收尾：远端仓库已建，Release 自动化已上线。
 - 清理信号包含 `SIGINT`、`SIGTERM`、`SIGHUP`、`SIGQUIT`。
 - 保留上游 MIT License 和 attribution。
 - 旧实验与旧 CLI 不直接删除，移入未跟踪的 `.archive/` 后从产品主干剔除。
@@ -29,7 +34,8 @@
 - [x] 阶段 2：实现进程身份、pmset 协调、常驻 LaunchAgent 监督器、Timer 到期和 Battery/Thermal 熔断（26 tests passed；Release warnings-as-errors 构建通过）。
 - [x] 阶段 3：实现公开 CLI、Hold 信号语义、setup/自检与命令级测试（37 tests passed；16 command scenarios passed；Release warnings-as-errors 构建通过）。
 - [x] 阶段 4：完成命名迁移、README/docs/打包/CI/补全、归档死代码并做最终用户级验收（38 tests passed；28 command scenarios passed；Release/build/Formula/style/static checks passed）。
-- [ ] 阶段 5：确认 GitHub visibility，创建 `EdgarZhong/MacLidAwake`、设置简介/topics、替换 origin 并推送。
+- [x] 阶段 5：将 CLI 与本机默认配置统一为 60 分钟/10%，完成真实 setup、Timer/Hold 清理与恢复验收（用户确认本机测试与验证通过）。
+- [x] 阶段 6（2026-09-07 用户重新授权并执行）：CLI 全部用户可见文案英文化（Sources/completions/tests 零残留 CJK）；README 重写为面向用户的双语版本（英文 `README.md` + `README.zh-Hans.md`）；CI 增加 macos-13(Intel)/macos-latest 矩阵；新增 `.github/workflows/release.yml`：tag `v*` 触发，跑测试、构建 arm64+x86_64 universal 二进制、打包 tar.gz + sha256、创建 GitHub Release，并把 `Formula/maclidawake.rb` 重写为指向该 tarball 的二进制 formula 后自动回提 main；创建公开 `EdgarZhong/MacLidAwake` 并推送，首发 tag `v0.1.0`。
 
 ## 关键架构决策
 
@@ -53,7 +59,7 @@
 - 真实 Battery/Thermal 条件无法稳定自动制造，自动测试只能验证状态机与 fake 系统适配器。
 - LaunchAgent 属于登录用户会话；开机到用户登录之前不承诺主动修复状态。
 - 系统 `SleepDisabled` 是全局设置，LidGo 在无有效 Lease 时执行 fail-safe 清理可能与手工设置或其他工具发生冲突，必须在文档中明确。
-- 阶段 5 仍等待用户确认 GitHub visibility；不得在确认前创建远端。
+- Release formula 为预编译二进制安装；首个 tag 前的 HEAD-only 源码 formula 会被 release 工作流整体重写。
 
 ## 完成定义
 

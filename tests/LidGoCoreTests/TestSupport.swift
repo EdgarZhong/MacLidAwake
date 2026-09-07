@@ -19,7 +19,7 @@ func XCTAssertTrue(
     line: UInt = #line
 ) {
     guard expression() else {
-        TestRecorder.shared.record(message.isEmpty ? "期望 true" : message, file: file, line: line)
+        TestRecorder.shared.record(message.isEmpty ? "Expected true" : message, file: file, line: line)
         return
     }
 }
@@ -31,7 +31,7 @@ func XCTAssertFalse(
     file: StaticString = #filePath,
     line: UInt = #line
 ) {
-    XCTAssertTrue(!expression(), message.isEmpty ? "期望 false" : message, file: file, line: line)
+    XCTAssertTrue(!expression(), message.isEmpty ? "Expected false" : message, file: file, line: line)
 }
 
 @MainActor
@@ -45,7 +45,7 @@ func XCTAssertEqual<T: Equatable>(
     let actualValue = try actual()
     let expectedValue = try expected()
     guard actualValue == expectedValue else {
-        let detail = message.isEmpty ? "期望 \(expectedValue)，实际 \(actualValue)" : message
+        let detail = message.isEmpty ? "Expected \(expectedValue), got \(actualValue)" : message
         TestRecorder.shared.record(detail, file: file, line: line)
         return
     }
@@ -59,7 +59,7 @@ func XCTAssertNil<T>(
     line: UInt = #line
 ) {
     guard value() == nil else {
-        TestRecorder.shared.record(message.isEmpty ? "期望 nil" : message, file: file, line: line)
+        TestRecorder.shared.record(message.isEmpty ? "Expected nil" : message, file: file, line: line)
         return
     }
 }
@@ -72,7 +72,7 @@ func XCTAssertNotNil<T>(
     line: UInt = #line
 ) {
     guard value() != nil else {
-        TestRecorder.shared.record(message.isEmpty ? "期望非 nil" : message, file: file, line: line)
+        TestRecorder.shared.record(message.isEmpty ? "Expected non-nil" : message, file: file, line: line)
         return
     }
 }
@@ -86,7 +86,7 @@ func XCTAssertThrowsError<T>(
 ) {
     do {
         _ = try expression()
-        TestRecorder.shared.record(message.isEmpty ? "期望抛出错误" : message, file: file, line: line)
+        TestRecorder.shared.record(message.isEmpty ? "Expected an error to be thrown" : message, file: file, line: line)
     } catch {
         return
     }
@@ -121,7 +121,7 @@ final class TestRunner {
         do {
             try body()
         } catch {
-            TestRecorder.shared.record("未捕获错误：\(error)", file: #filePath, line: #line)
+            TestRecorder.shared.record("Uncaught error: \(error)", file: #filePath, line: #line)
         }
         let failures = Array(TestRecorder.shared.assertionFailures.dropFirst(before))
         if failures.isEmpty {

@@ -1,97 +1,107 @@
 # MacLidAwake
 
-Temporarily keep a MacBook running with the lid closed, then automatically restore normal sleep behavior.
+**Temporarily keep a MacBook running with the lid closed — then automatically restore normal sleep.**
 
-CLI：`lidgo`
+[中文文档](README.zh-Hans.md)
 
-MacLidAwake 面向临时合盖移动场景：让 Codex、Claude Code、编译或下载任务继续运行，并在 Timer/Hold Lease 结束或安全条件触发后恢复正常睡眠。它不是通用电源管理器，也不是命令包装器。
+MacLidAwake is built for one job: you need to close the lid and carry your MacBook for a while, but a local task — an AI agent like Claude Code or Codex, a build, a download — should keep running. When the timer ends, you stop the hold, or a safety condition trips, your Mac goes back to its normal sleep behavior.
 
-## 系统要求
+It is not a general power manager, not a `caffeinate` clone, and not a command wrapper.
 
-- macOS 13 或更高版本，Apple Silicon 与 Intel Mac 均可构建。
-- 管理员账号；`lidgo setup` 会由系统 `sudo` 正常请求一次认证。
-- Swift 6 工具链仅在从源码构建时需要。
+## Requirements
 
-## 从源码安装
+- macOS 13 (Ventura) or later, Apple Silicon or Intel.
+- An administrator account. `lidgo setup` asks for your password once, through the system `sudo` prompt — MacLidAwake never sees, stores, or types your password.
+
+## Install
+
+**Homebrew** (installs the prebuilt universal binary and zsh completion):
 
 ```bash
+git clone https://github.com/EdgarZhong/MacLidAwake.git
+cd MacLidAwake
+brew install --formula Formula/maclidawake.rb
+```
+
+**Prebuilt binary** from [GitHub Releases](https://github.com/EdgarZhong/MacLidAwake/releases):
+
+```bash
+tar -xzf maclidawake-*-macos.tar.gz
+cd maclidawake-*-macos
+xattr -d com.apple.quarantine lidgo   # only needed for browser downloads
+install -m 0755 lidgo "${HOME}/.local/bin/lidgo"
+```
+
+**Build from source** (requires a Swift 6 toolchain):
+
+```bash
+git clone https://github.com/EdgarZhong/MacLidAwake.git
+cd MacLidAwake
 ./scripts/build.sh
-/usr/bin/install -d "${HOME}/.local/bin"
-/usr/bin/install -m 0755 .build/release/lidgo "${HOME}/.local/bin/lidgo"
-export PATH="${HOME}/.local/bin:${PATH}"
+install -m 0755 .build/release/lidgo "${HOME}/.local/bin/lidgo"
+```
+
+Make sure `~/.local/bin` (or your chosen install directory) is on your `PATH`.
+
+## Setup (once)
+
+```bash
 lidgo setup
 ```
 
-`lidgo setup` 幂等安装或修复 sudoers、全局参与锁与 LaunchAgent。首个 tag 发布前，[Homebrew Formula](Formula/maclidawake.rb) 仅提供 `--HEAD`/发布模板，不代表已有稳定 release。
+This idempotently installs three things, and can repair them if they break:
 
-## 使用
+- a **sudoers rule** allowing exactly two commands without a password: `pmset -a disablesleep 1` and `pmset -a disablesleep 0` (validated with `visudo` before install),
+- a root-owned **participation lock** at `/var/db/maclidawake.lock`,
+- a per-user **LaunchAgent** that supervises timers and safety cutoffs in the background.
 
-```text
-lidgo                              创建默认 60 分钟 Timer，或显示当前状态
-lidgo -r
-lidgo --refresh                   刷新纯 Timer；存在 Hold 时拒绝
-lidgo --hold                      前台维持，Ctrl-C 后释放
-lidgo switch -f
-lidgo switch --force              强制反转全局状态
-lidgo config                      显示配置
-lidgo config --duration 1h30m     设置未来 Timer 的默认时长
-lidgo config --battery 15         设置低电量安全阈值
-lidgo setup                       安装或修复权限与 LaunchAgent
-lidgo help                        显示精简帮助
-```
-
-默认命令是幂等的：已有 Timer 时只显示 deadline，不会悄悄刷新。Timer 与多个 Hold 可以并存；最后一个有效 Lease 消失时才恢复正常睡眠。
-
-## 安全模型
-
-- 不保存、加密保存或自动输入管理员密码，也不使用 Keychain 存储认证材料。
-- sudoers 只允许 `/usr/bin/pmset -a disablesleep 1` 与 `/usr/bin/pmset -a disablesleep 0` 两条完整命令；安装前必须通过 `visudo -cf`。
-- 普通运行只调用 `sudo -n`，全局 `/var/db/maclidawake.lock` 固定为 `0660 root:admin` 并以 `O_NOFOLLOW` 打开。
-- 电量小于等于配置阈值、电池不可读或 thermal pressure 达到 critical 时，所有 Lease 被清除并推进 generation；条件恢复后不会自动重新开启。
-- Hold 同时验证 PID、进程启动身份与运行状态；Ctrl-Z/SIGSTOP 不会留下无限期 Lease，force 或安全熔断后的旧 Hold 不能抢回。
-
-更完整的权限边界和失败恢复见[架构与安全设计](docs/architecture-and-security.md)。
-
-## 项目结构
+## Usage
 
 ```text
-Sources/LidGoCore/       Lease、状态存储、安全监控和 macOS 适配器
-Sources/lidgo/           CLI 与内部 agent/root setup 入口
-tests/LidGoCoreTests/    零依赖 Swift 单元测试 harness
-tests/run_tests.sh       隔离的无 sudo 命令级验收
-scripts/build.sh         Release 构建入口
-completions/_lidgo       zsh completion
-Formula/                 Homebrew 发布模板
-docs/                    产品、架构、安全、测试和验收记录
+lidgo                        Start the default 60-minute timer (or show status if already on)
+lidgo --hold                 Keep awake until you press Ctrl-C in this terminal
+lidgo -r | --refresh         Restart the timer (refused while a Hold is active)
+lidgo switch -f | --force    Force-toggle the global state
+lidgo config                 Show configuration
+lidgo config -d 45           Set future timers to 45 minutes (also: 90m, 2h, 1h30m)
+lidgo config -b 10           Set the battery safety cutoff (percent)
+lidgo setup                  Install or repair permissions and the LaunchAgent
+lidgo help                   Show help
 ```
 
-## 开发与测试
+- Defaults: **60-minute timer**, **10% battery cutoff**.
+- Running `lidgo` while a timer is active just shows the deadline — it never silently refreshes.
+- A Timer and any number of Holds can coexist. Normal sleep resumes only when the *last* valid lease disappears.
+- A Hold verifies the holding process by PID, start-time identity, and run state — a stopped (Ctrl-Z) or dead process cannot pin your Mac awake forever.
+
+## Safety model
+
+- No passwords stored, no Keychain, no auto-typing. Day-to-day runs use `sudo -n` only.
+- All leases are cleared and stay off when the battery reaches the cutoff, the battery state can't be read, or thermal pressure is critical. They never turn back on by themselves.
+- `lidgo switch -f` and safety trips bump a generation counter, so stale holds can't reclaim the awake state.
+- Full details: [docs/architecture-and-security.md](docs/architecture-and-security.md).
+
+## Uninstall
 
 ```bash
-swift run LidGoCoreTests
-swift build --product lidgo
-bash tests/run_tests.sh
-swift build -c release -Xswiftc -warnings-as-errors
+launchctl bootout "gui/$(id -u)" com.maclidawake.lidgo.agent 2>/dev/null
+rm -f "${HOME}/Library/LaunchAgents/com.maclidawake.lidgo.agent.plist"
+sudo rm -f /etc/sudoers.d/maclidawake
+sudo rm -f /var/db/maclidawake.lock
+rm -rf "${HOME}/Library/Application Support/MacLidAwake"
+rm -f "${HOME}/.local/bin/lidgo"   # or: brew uninstall maclidawake
 ```
 
-自动测试使用临时 Application Support、fake 安全读数与 fake 电源适配器，不调用真实 sudo/pmset。物理合盖、真实低电量与 thermal 条件仍需按[测试与验收说明](docs/testing.md)人工验证。
+## Known limitations
 
-## 重要文档索引
+- `SleepDisabled` is a system-wide boolean with no owner. MacLidAwake's fail-safe cleanup may reset a value set by hand or by another tool.
+- The supervisor runs inside your login session; between boot and login it does not repair state.
+- Actual lid-closed behavior depends on the specific MacBook, macOS version, and hardware state.
 
-| 内容 | 文件 |
-| --- | --- |
-| 已确认的产品与 CLI 契约 | [docs/product-spec.md](docs/product-spec.md) |
-| 架构、安全边界与异常恢复 | [docs/architecture-and-security.md](docs/architecture-and-security.md) |
-| 自动化与真实硬件验收 | [docs/testing.md](docs/testing.md) |
-| 当前阶段进展与风险 | [CLAUDE.md](CLAUDE.md) |
-| 长期协作与开发规范 | [AGENTS.md](AGENTS.md) |
+## For developers
 
-## 已知限制
+Testing, CI, and release automation live in `tests/`, `scripts/`, and `.github/workflows/`. See [docs/testing.md](docs/testing.md) and [docs/product-spec.md](docs/product-spec.md) for the full specification.
 
-- `SleepDisabled` 是系统全局布尔值，没有所有者信息；LidGo 的 fail-safe 清理可能覆盖其他工具或手工设置的同一值。
-- LaunchAgent 只在登录用户会话内监督；开机到登录前不承诺主动恢复。
-- 真实合盖效果受具体 MacBook、macOS 版本和硬件状态影响，发布前必须完成物理机抽查。
+## License & attribution
 
-## License 与上游归属
-
-项目基于 [ecc521/keepawake](https://github.com/ecc521/keepawake) 改造，复用了其精确 sudoers、`pmset` 与内核参与锁安全思路。继续遵守上游 MIT License，并保留 Tucker Willenborg 的版权声明。详见 [LICENSE](LICENSE)。
+MacLidAwake is derived from [ecc521/keepawake](https://github.com/ecc521/keepawake) and reuses its least-privilege design: exact sudoers grants, `pmset`, and a kernel participation lock. It remains under the MIT License with Tucker Willenborg's copyright notice preserved. See [LICENSE](LICENSE).

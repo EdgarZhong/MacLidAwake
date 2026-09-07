@@ -47,6 +47,33 @@ final class SetupManagerTests {
         ])
     }
 
+    func testAuthorizationCommandUsesExactBinaryAndInheritedTerminal() {
+        let command = SetupManager.authorizationCommand(
+            executablePath: "/Users/test/.local/bin/lidgo"
+        )
+        XCTAssertEqual(command.executable, "/usr/bin/sudo")
+        XCTAssertEqual(command.arguments, [
+            "/Users/test/.local/bin/lidgo", "__root-setup",
+        ])
+        XCTAssertTrue(command.inheritsTerminal)
+    }
+
+    func testInteractiveRunnerKeepsChildInForegroundProcessGroup() throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let childGroupFile = root.appendingPathComponent("child-pgid")
+        let command = "/bin/ps -o pgid= -p $$ > '\(childGroupFile.path)'"
+
+        let result = ProcessCommandRunner().runInteractively(
+            executable: "/bin/sh",
+            arguments: ["-c", command]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        let text = try String(contentsOf: childGroupFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(pid_t(text), getpgrp())
+    }
+
     func testGeneratedRulePassesRealVisudoAndGarbageFails() throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let valid = root.appendingPathComponent("valid.sudoers")
@@ -58,7 +85,7 @@ final class SetupManagerTests {
         let validResult = runner.run(executable: "/usr/sbin/visudo", arguments: ["-cf", valid.path])
         let invalidResult = runner.run(executable: "/usr/sbin/visudo", arguments: ["-cf", invalid.path])
         XCTAssertEqual(validResult.status, 0, validResult.output)
-        XCTAssertFalse(invalidResult.status == 0, "visudo 不应接受损坏规则")
+        XCTAssertFalse(invalidResult.status == 0, "visudo must not accept a corrupt rule")
     }
 
     func testLaunchAgentPlistUsesExpectedLabelAndInternalAgent() throws {

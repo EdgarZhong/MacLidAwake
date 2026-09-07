@@ -102,6 +102,22 @@ else
   fail "setup repairs a corrupt LaunchAgent plist"
 fi
 
+use_home duration-units
+"$LIDGO_BIN" setup >/dev/null || true
+short_config_output="$("$LIDGO_BIN" config -d 45 -b 20)"
+if echo "$short_config_output" | grep -q 'Default duration : 45m' \
+  && echo "$short_config_output" | grep -q 'Battery cutoff   : 20%'; then
+  config_before_seconds="$(cksum "$LIDGO_HOME/config.json")"
+  if ! "$LIDGO_BIN" config --duration 30s >/dev/null 2>&1 \
+    && [ "$config_before_seconds" = "$(cksum "$LIDGO_HOME/config.json")" ]; then
+    pass "config short options work, bare duration means minutes, and seconds are rejected"
+  else
+    fail "config short options work, bare duration means minutes, and seconds are rejected"
+  fi
+else
+  fail "config short options work, bare duration means minutes, and seconds are rejected"
+fi
+
 use_home timer
 "$LIDGO_BIN" setup >/dev/null || true
 if "$LIDGO_BIN" config --duration 90m --battery 20 | grep -q 'Battery cutoff   : 20%'; then
@@ -147,7 +163,7 @@ if [ "$refreshed_deadline" != "$second_deadline" ]; then
 else
   fail "refresh advances timer deadline"
 fi
-if "$LIDGO_BIN" switch -f | grep -q '已强制关闭' && timer_is_null; then
+if "$LIDGO_BIN" switch -f | grep -q 'force-disabled' && timer_is_null; then
   pass "force clears active timer"
 else
   fail "force clears active timer"
@@ -189,7 +205,7 @@ if start_hold; then
   state_before="$(cksum "$LIDGO_HOME/state.json")"
   refresh_output="$("$LIDGO_BIN" -r)"
   state_after="$(cksum "$LIDGO_HOME/state.json")"
-  if echo "$refresh_output" | grep -q '无法刷新' \
+  if echo "$refresh_output" | grep -q 'Cannot refresh' \
     && [ "$state_before" = "$state_after" ] \
     && finish_hold INT; then
     pass "refresh rejects Hold without changing leases"
@@ -207,7 +223,7 @@ HOLD_A=$!
 "$LIDGO_BIN" --hold >"$LIDGO_HOME/hold-b.out" 2>&1 &
 HOLD_B=$!
 if wait_until '[ "$(hold_count)" -eq 2 ]' \
-  && "$LIDGO_BIN" | grep -q 'Hold：2 个终端会话正在维持' \
+  && "$LIDGO_BIN" | grep -q 'Hold: 2 terminal session(s) holding' \
   && kill -INT "$HOLD_A" \
   && wait_until '! kill -0 "$HOLD_A" 2>/dev/null' \
   && wait_until '[ "$(hold_count)" -eq 1 ]' \
@@ -226,8 +242,8 @@ use_home timer-plus-hold
 "$LIDGO_BIN" setup >/dev/null || true
 "$LIDGO_BIN" >/dev/null || true
 if start_hold \
-  && "$LIDGO_BIN" | grep -q 'Timer：' \
-  && "$LIDGO_BIN" | grep -q 'Hold：1 个终端会话正在维持' \
+  && "$LIDGO_BIN" | grep -q 'Timer:' \
+  && "$LIDGO_BIN" | grep -q 'Hold: 1 terminal session(s) holding' \
   && kill -STOP "$HOLD_PID" \
   && wait_until 'ps -o stat= -p "$HOLD_PID" | grep -q T' \
   && /usr/bin/plutil -replace timer.deadline -string '2000-01-01T00:00:00Z' "$LIDGO_HOME/state.json" \
@@ -379,7 +395,7 @@ run_safety_case() {
   wait "$AGENT_PID" >/dev/null 2>&1 || true
 }
 
-run_safety_case battery 15 nominal battery
+run_safety_case battery 10 nominal battery
 run_safety_case battery-unavailable unavailable nominal batteryUnavailable
 run_safety_case thermal 80 critical thermal
 

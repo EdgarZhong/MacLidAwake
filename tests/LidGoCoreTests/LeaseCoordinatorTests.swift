@@ -18,7 +18,7 @@ final class LeaseCoordinatorTests {
             inspect: inspector([:])
         )
         guard case let .created(timer) = first else {
-            return XCTFail("OFF 时应创建 Timer")
+            return XCTFail("Should create a Timer while OFF")
         }
         XCTAssertEqual(timer.deadline, now.addingTimeInterval(3_600))
 
@@ -28,7 +28,7 @@ final class LeaseCoordinatorTests {
             inspect: inspector([:])
         )
         guard case let .unchanged(summary) = second else {
-            return XCTFail("已有 Timer 时默认命令必须幂等")
+            return XCTFail("Default command must be idempotent with an existing Timer")
         }
         XCTAssertEqual(summary.timer?.deadline, timer.deadline)
     }
@@ -40,7 +40,7 @@ final class LeaseCoordinatorTests {
             config: .default,
             inspect: inspector([:])
         ) else {
-            return XCTFail("OFF refresh 应创建 Timer")
+            return XCTFail("Refresh while OFF should create a Timer")
         }
         XCTAssertEqual(created.deadline, now.addingTimeInterval(3_600))
 
@@ -49,7 +49,7 @@ final class LeaseCoordinatorTests {
             config: LidGoConfig(defaultDurationSeconds: 7_200, batteryCutoffPercent: 15),
             inspect: inspector([:])
         ) else {
-            return XCTFail("纯 Timer 应刷新")
+            return XCTFail("A pure Timer should refresh")
         }
         XCTAssertEqual(refreshed.deadline, now.addingTimeInterval(7_500))
 
@@ -154,7 +154,7 @@ final class LeaseCoordinatorTests {
             config: .default,
             inspect: inspector([:])
         ) else {
-            return XCTFail("OFF force 应创建 Timer")
+            return XCTFail("Force while OFF should create a Timer")
         }
         XCTAssertEqual(off.state.generation, 1)
         XCTAssertEqual(timer.generation, 1)
@@ -170,7 +170,7 @@ final class LeaseCoordinatorTests {
             now: now.addingTimeInterval(1),
             snapshot: owner
         ) else {
-            return XCTFail("同 generation 的有效 owner 应恢复")
+            return XCTFail("A valid owner within the same generation should resume")
         }
         XCTAssertEqual(resumed.id, hold.id)
 

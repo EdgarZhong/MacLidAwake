@@ -73,12 +73,18 @@ public enum LidGoCommand: Equatable, Sendable {
             }
             let value = arguments[index + 1]
             switch option {
-            case "--duration" where duration == nil:
+            case "-d", "--duration":
+                guard duration == nil else {
+                    throw CommandParseError.invalidArguments(arguments)
+                }
                 guard let seconds = DurationParser.parse(value) else {
                     throw CommandParseError.invalidDuration(value)
                 }
                 duration = seconds
-            case "--battery" where battery == nil:
+            case "-b", "--battery":
+                guard battery == nil else {
+                    throw CommandParseError.invalidArguments(arguments)
+                }
                 guard let percent = Int(value), String(percent) == value,
                       (1...99).contains(percent)
                 else {
@@ -107,13 +113,13 @@ public enum CommandParseError: Error, Equatable, CustomStringConvertible {
     public var description: String {
         switch self {
         case let .invalidArguments(arguments):
-            return "无法识别参数：\(arguments.joined(separator: " "))。请运行 lidgo help"
+            return "Unrecognized arguments: \(arguments.joined(separator: " ")). Run lidgo help"
         case let .missingValue(option):
-            return "\(option) 缺少参数值"
+            return "\(option) requires a value"
         case let .invalidDuration(value):
-            return "无效时长 \(value)；请使用 90m、2h 或 1h30m"
+            return "Invalid duration \(value); a bare number means minutes, or use 90m, 2h, or 1h30m"
         case let .invalidBattery(value):
-            return "无效低电量阈值 \(value)；必须是 1 到 99"
+            return "Invalid battery cutoff \(value); must be between 1 and 99"
         }
     }
 }

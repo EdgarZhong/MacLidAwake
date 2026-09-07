@@ -76,6 +76,8 @@ func runSetupTest(_ name: String, _ body: @escaping (SetupManagerTests) throws -
     }
 }
 runSetupTest("sudoers scope is exact", { $0.testSudoersRuleHasExactlyTwoLiteralPmsetCommands() })
+runSetupTest("setup authorization inherits terminal", { $0.testAuthorizationCommandUsesExactBinaryAndInheritedTerminal() })
+runSetupTest("interactive setup stays in foreground process group", { try $0.testInteractiveRunnerKeepsChildInForegroundProcessGroup() })
 runSetupTest("root setup validates before install", { $0.testRootSetupPlanValidatesBeforeInstalling() })
 runSetupTest("generated sudoers passes real visudo", { try $0.testGeneratedRulePassesRealVisudoAndGarbageFails() })
 runSetupTest("launch agent plist is exact", { try $0.testLaunchAgentPlistUsesExpectedLabelAndInternalAgent() })

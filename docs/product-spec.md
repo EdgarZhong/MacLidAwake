@@ -18,10 +18,13 @@ lidgo --refresh
 lidgo switch -f
 lidgo switch --force
 lidgo config
+lidgo config -d 45
+lidgo config --duration 45
 lidgo config --duration 90m
 lidgo config --duration 2h
 lidgo config --duration 1h30m
-lidgo config --battery 15
+lidgo config -b 10
+lidgo config --battery 10
 lidgo setup
 lidgo help
 lidgo -h
@@ -60,15 +63,16 @@ lidgo --help
 
 ### Config
 
-- 默认配置：Timer 60 分钟、Battery cutoff 15%、Thermal safety enabled。
-- duration 支持 `90m`、`2h`、`1h30m`，必须大于 0。
+- 默认配置：Timer 60 分钟、Battery cutoff 10%、Thermal safety enabled。
+- duration 参数支持等价短长形式 `-d`/`--duration`；battery 参数支持等价短长形式 `-b`/`--battery`。
+- duration 裸整数按分钟解释，支持 `45`、`90m`、`2h`、`1h30m`，必须大于 0；不支持秒单位。
 - battery 必须为 1–99 的整数。
 - 一次调用可同时更新 duration 和 battery。
 - 配置修改只影响未来 Timer 和 refresh，不改变现有 Timer deadline。
 
 ### Setup
 
-`lidgo setup` 必须幂等完成：macOS 与 `pmset` 检查、一次正常 sudo 认证、严格 sudoers 安装/修复、`visudo -cf`、状态/配置目录、LaunchAgent 安装/修复、启动和完整自检。不得保存密码或自动向 sudo stdin 写入密码。
+`lidgo setup` 必须幂等完成：macOS 与 `pmset` 检查、一次正常 sudo 认证、严格 sudoers 安装/修复、`visudo -cf`、状态/配置目录、LaunchAgent 安装/修复、启动和完整自检。sudo 认证必须直接继承调用终端的 stdin/stdout/stderr，并保持在同一前台进程组，由 sudo/TTY 关闭密码回显；不得把认证提示或输入接入捕获管道，不得保存密码或自动向 sudo stdin 写入密码。
 
 ## Lease 状态模型
 

@@ -17,8 +17,8 @@ case "$state" in
         ;;
       config)
         _arguments \
-          '--duration[set future timer duration]:duration (for example 90m or 2h):' \
-          '--battery[set battery cutoff]:percentage (1-99):'
+          '(-d --duration)'{-d,--duration}'[set future timer duration]:duration (for example 45, 90m, or 2h):' \
+          '(-b --battery)'{-b,--battery}'[set battery cutoff]:percentage (1-99):'
         ;;
     esac
     ;;

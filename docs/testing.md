@@ -22,6 +22,7 @@ swift run LidGoCoreTests
 - Battery/Thermal 全局熔断、电池状态不可读 fail-safe 与不自动恢复。
 - 损坏/残留状态 fail-safe、原子写入与并发事务。
 - sudoers 文本精确范围和 LaunchAgent plist 内容。
+- setup 的 sudo 授权命令必须继承终端并保持与父进程相同的前台 PGID，不得捕获认证提示或输入。
 - 生成规则通过真实 `/usr/sbin/visudo -cf`，且损坏规则被拒绝。
 - setup 的 `O_NOFOLLOW`、文件模式、幂等写入与损坏 plist 修复。
 
@@ -53,7 +54,7 @@ git diff --check
 
 ## 不可自动化的真实验收
 
-以下步骤会改变真实系统睡眠状态，只能在用户确认并完成 `lidgo setup` 后执行：
+以下步骤会改变真实系统睡眠状态，只能在用户确认并完成 `lidgo setup` 后执行。运行 setup 时必须确认密码输入不回显，回车后能够继续且密码不出现在终端输出或 agent 日志中：
 
 1. `pmset -g` 确认初始 `SleepDisabled=0`。
 2. `lidgo`，确认立即退出且 `SleepDisabled=1`；关闭 Terminal，等待 Timer 到期后确认回到 0。

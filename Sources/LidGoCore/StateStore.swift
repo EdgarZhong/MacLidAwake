@@ -13,19 +13,19 @@ public enum StateStoreError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case let .unsafeDirectory(url):
-            return "状态目录不是安全的普通目录：\(url.path)"
+            return "State directory is not a safe plain directory: \(url.path)"
         case let .cannotCreateDirectory(url, error):
-            return "无法创建状态目录 \(url.path)：\(error)"
+            return "Cannot create state directory \(url.path): \(error)"
         case let .cannotOpenLock(url, code):
-            return "无法打开状态锁 \(url.path)：\(String(cString: strerror(code)))"
+            return "Cannot open state lock \(url.path): \(String(cString: strerror(code)))"
         case let .cannotLock(url, code):
-            return "无法取得状态锁 \(url.path)：\(String(cString: strerror(code)))"
+            return "Cannot acquire state lock \(url.path): \(String(cString: strerror(code)))"
         case let .invalidSchema(version):
-            return "不支持的状态 schema：\(version)"
+            return "Unsupported state schema: \(version)"
         case let .cannotWrite(url, code):
-            return "无法写入 \(url.path)：\(String(cString: strerror(code)))"
+            return "Cannot write \(url.path): \(String(cString: strerror(code)))"
         case let .cannotReplace(url, code):
-            return "无法原子替换 \(url.path)：\(String(cString: strerror(code)))"
+            return "Cannot atomically replace \(url.path): \(String(cString: strerror(code)))"
         }
     }
 }

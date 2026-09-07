@@ -14,16 +14,16 @@ public struct LidGoConfig: Codable, Equatable, Sendable {
         public var description: String {
             switch self {
             case .invalidDuration:
-                return "默认时长必须大于 0"
+                return "Default duration must be greater than 0"
             case .invalidBatteryCutoff:
-                return "低电量阈值必须是 1 到 99"
+                return "Battery cutoff must be between 1 and 99"
             }
         }
     }
 
     public static let `default` = LidGoConfig(
         defaultDurationSeconds: 3_600,
-        batteryCutoffPercent: 15
+        batteryCutoffPercent: 10
     )
 
     public var defaultDurationSeconds: Int

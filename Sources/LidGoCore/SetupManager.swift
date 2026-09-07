@@ -4,10 +4,13 @@ import Foundation
 public struct SetupCommand: Equatable, Sendable {
     public let executable: String
     public let arguments: [String]
+    /// Whether the process must inherit the caller's terminal instead of using captured I/O.
+    public let inheritsTerminal: Bool
 
-    public init(executable: String, arguments: [String]) {
+    public init(executable: String, arguments: [String], inheritsTerminal: Bool = false) {
         self.executable = executable
         self.arguments = arguments
+        self.inheritsTerminal = inheritsTerminal
     }
 }
 
@@ -22,17 +25,17 @@ public enum SetupError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .unsupportedSystem:
-            return "MacLidAwake 只支持 macOS"
+            return "MacLidAwake only supports macOS"
         case .missingPmset:
-            return "找不到 /usr/bin/pmset；当前系统不受支持"
+            return "/usr/bin/pmset not found; this system is not supported"
         case .rootRequired:
-            return "内部 root setup 只能通过 lidgo setup 调用"
+            return "Internal root setup can only be invoked via lidgo setup"
         case let .commandFailed(command, result):
-            return "命令失败（\(result.status)）：\(command.executable) \(command.arguments.joined(separator: " "))\n\(result.output)"
+            return "Command failed (\(result.status)): \(command.executable) \(command.arguments.joined(separator: " "))\n\(result.output)"
         case let .unsafePath(url):
-            return "拒绝写入不安全路径：\(url.path)"
+            return "Refusing to write to unsafe path: \(url.path)"
         case let .selfCheckFailed(reason):
-            return "setup 自检失败：\(reason)"
+            return "Setup self-check failed: \(reason)"
         }
     }
 }
@@ -96,6 +99,15 @@ public final class SetupManager: @unchecked Sendable {
         ]
     }
 
+    /// Builds the one setup command that must own the terminal for sudo authentication.
+    public static func authorizationCommand(executablePath: String) -> SetupCommand {
+        SetupCommand(
+            executable: "/usr/bin/sudo",
+            arguments: [executablePath, "__root-setup"],
+            inheritsTerminal: true
+        )
+    }
+
     public func setup() throws {
 #if !os(macOS)
         throw SetupError.unsupportedSystem
@@ -108,10 +120,7 @@ public final class SetupManager: @unchecked Sendable {
         if isTesting {
             try createTestingGlobalLock()
         } else {
-            let command = SetupCommand(
-                executable: "/usr/bin/sudo",
-                arguments: [executablePath, "__root-setup"]
-            )
+            let command = Self.authorizationCommand(executablePath: executablePath)
             try runRequired(command)
         }
 
@@ -189,7 +198,7 @@ public final class SetupManager: @unchecked Sendable {
               plist["RunAtLoad"] as? Bool == true,
               plist["KeepAlive"] as? Bool == true
         else {
-            throw SetupError.selfCheckFailed("LaunchAgent 内容不匹配")
+            throw SetupError.selfCheckFailed("LaunchAgent plist contents do not match")
         }
         try checkDirectory(paths.applicationSupport, mode: 0o700)
         if isTesting {
@@ -249,12 +258,12 @@ public final class SetupManager: @unchecked Sendable {
         if close(descriptor) != 0, failure == nil { failure = errno }
         if let failure {
             _ = unlink(temporary.path)
-            throw SetupError.selfCheckFailed("无法写入 LaunchAgent：\(String(cString: strerror(failure)))")
+            throw SetupError.selfCheckFailed("Cannot write LaunchAgent: \(String(cString: strerror(failure)))")
         }
         guard rename(temporary.path, paths.launchAgentPlist.path) == 0 else {
             let failure = errno
             _ = unlink(temporary.path)
-            throw SetupError.selfCheckFailed("无法安装 LaunchAgent：\(String(cString: strerror(failure)))")
+            throw SetupError.selfCheckFailed("Cannot install LaunchAgent: \(String(cString: strerror(failure)))")
         }
         guard chmod(paths.launchAgentPlist.path, 0o600) == 0 else {
             throw SetupError.unsafePath(paths.launchAgentPlist)
@@ -285,7 +294,7 @@ public final class SetupManager: @unchecked Sendable {
               lockInfo.st_gid == getgrnam("admin")?.pointee.gr_gid,
               lockInfo.st_mode & 0o777 == 0o660
         else {
-            throw SetupError.selfCheckFailed("全局锁的 owner/group/mode 不正确")
+            throw SetupError.selfCheckFailed("Global lock has incorrect owner/group/mode")
         }
 
         var ruleInfo = stat()
@@ -295,7 +304,7 @@ public final class SetupManager: @unchecked Sendable {
               ruleInfo.st_gid == getgrnam("wheel")?.pointee.gr_gid,
               ruleInfo.st_mode & 0o777 == 0o440
         else {
-            throw SetupError.selfCheckFailed("sudoers 的 owner/group/mode 不正确")
+            throw SetupError.selfCheckFailed("sudoers file has incorrect owner/group/mode")
         }
         let listing = runner.run(executable: "/usr/bin/sudo", arguments: ["-n", "-l"])
         let normalizedListing = listing.output
@@ -305,7 +314,7 @@ public final class SetupManager: @unchecked Sendable {
         guard listing.status == 0,
               normalizedListing.contains(expectedGrant)
         else {
-            throw SetupError.selfCheckFailed("未找到两条精确的 NOPASSWD pmset 授权")
+            throw SetupError.selfCheckFailed("The two exact NOPASSWD pmset grants were not found")
         }
     }
 
@@ -315,7 +324,7 @@ public final class SetupManager: @unchecked Sendable {
               info.st_mode & S_IFMT == S_IFDIR,
               info.st_mode & 0o777 == mode
         else {
-            throw SetupError.selfCheckFailed("目录不安全：\(url.path)")
+            throw SetupError.selfCheckFailed("Directory is unsafe: \(url.path)")
         }
     }
 
@@ -325,12 +334,20 @@ public final class SetupManager: @unchecked Sendable {
               info.st_mode & S_IFMT == S_IFREG,
               info.st_mode & 0o777 == mode
         else {
-            throw SetupError.selfCheckFailed("文件不安全：\(url.path)")
+            throw SetupError.selfCheckFailed("File is unsafe: \(url.path)")
         }
     }
 
     private func runRequired(_ command: SetupCommand) throws {
-        let result = runner.run(executable: command.executable, arguments: command.arguments)
+        let result: CommandResult
+        if command.inheritsTerminal {
+            result = runner.runInteractively(
+                executable: command.executable,
+                arguments: command.arguments
+            )
+        } else {
+            result = runner.run(executable: command.executable, arguments: command.arguments)
+        }
         guard result.status == 0 else { throw SetupError.commandFailed(command, result) }
     }
 }

@@ -10,8 +10,8 @@ public enum StatusFormatter {
       lidgo --hold              Hold until Ctrl-C
       lidgo switch -f           Force toggle global state
       lidgo config              Show configuration
-      lidgo config --duration 2h
-      lidgo config --battery 15
+      lidgo config -d 45       Set duration (bare value = minutes; h/m; --duration)
+      lidgo config -b 10       Set battery cutoff percentage (--battery)
       lidgo setup               Install or repair privileges
       lidgo help                Show help
     """
@@ -22,30 +22,30 @@ public enum StatusFormatter {
         timeZone: TimeZone = .current
     ) -> String {
         guard summary.isActive else {
-            return "LidGo 未开启\n正常睡眠已启用"
+            return "LidGo off\nNormal sleep enabled"
         }
 
-        var lines = ["LidGo 已开启"]
+        var lines = ["LidGo on"]
         if let timer = summary.timer {
             let remaining = max(0, Int(ceil(timer.deadline.timeIntervalSince(now) / 60)))
             let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.timeZone = timeZone
             formatter.dateFormat = "HH:mm"
-            lines.append("Timer：剩余 \(remaining) 分钟，\(formatter.string(from: timer.deadline)) 自动恢复睡眠")
+            lines.append("Timer: \(remaining) min remaining, sleep resumes at \(formatter.string(from: timer.deadline))")
         }
         if summary.holdCount > 0 {
-            lines.append("Hold：\(summary.holdCount) 个终端会话正在维持")
+            lines.append("Hold: \(summary.holdCount) terminal session(s) holding")
         }
         return lines.joined(separator: "\n")
     }
 
     public static func timerCreated(_ timer: TimerLease, now: Date) -> String {
-        "LidGo 已开启\n" + timerLine(timer, now: now)
+        "LidGo on\n" + timerLine(timer, now: now)
     }
 
     public static func timerRefreshed(_ timer: TimerLease, now: Date) -> String {
-        "LidGo 计时已刷新\n" + timerLine(timer, now: now)
+        "LidGo timer refreshed\n" + timerLine(timer, now: now)
     }
 
     public static func configuration(_ config: LidGoConfig) -> String {

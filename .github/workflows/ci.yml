@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -9,8 +11,14 @@ permissions:
 
 jobs:
   test:
-    runs-on: macos-latest
-    timeout-minutes: 10
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 is an Intel runner and the oldest supported macOS;
+        # macos-latest covers Apple Silicon on the newest macOS.
+        os: [macos-13, macos-latest]
     steps:
       - uses: actions/checkout@v7
       - name: Unit tests

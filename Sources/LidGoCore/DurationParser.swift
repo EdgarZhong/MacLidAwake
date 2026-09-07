@@ -25,8 +25,8 @@ public enum DurationParser {
             return total
         }
 
-        guard value.hasSuffix("m") else { return nil }
-        guard let minutes = positiveInt(String(value.dropLast())) else { return nil }
+        let minuteText = value.hasSuffix("m") ? String(value.dropLast()) : value
+        guard let minutes = positiveInt(minuteText) else { return nil }
         let (seconds, overflow) = minutes.multipliedReportingOverflow(by: 60)
         return overflow ? nil : seconds
     }

@@ -29,7 +29,7 @@ tests/
 ```swift
 struct LidGoConfig: Codable, Equatable {
     var defaultDurationSeconds: Int = 3600
-    var batteryCutoffPercent: Int = 15
+    var batteryCutoffPercent: Int = 10
 }
 
 struct TimerLease: Codable, Equatable {
@@ -106,7 +106,7 @@ Agent 也在启动 tick 前安装独立 signal-to-pipe，INT/TERM/HUP/QUIT 返�
 
 ## sudoers 与 setup 事务
 
-公开 `lidgo setup` 只在需要特权阶段调用：
+公开 `lidgo setup` 只在需要特权阶段调用。首次认证命令使用默认属性的 `posix_spawn`，不创建新 process group，使 sudo 与调用方保持在同一前台进程组；`stdin`、`stdout`、`stderr` 均原样继承当前终端，让 sudo/TTY 负责提示与关闭密码回显。该命令不得使用 Foundation `Process` 或输出捕获管道。其余非交互命令继续使用可审计的捕获 runner：
 
 ```text
 /usr/bin/sudo <当前 lidgo 绝对路径> __root-setup

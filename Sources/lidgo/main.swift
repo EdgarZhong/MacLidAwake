@@ -10,11 +10,11 @@ private enum CLIError: Error, CustomStringConvertible {
         case let .unsafe(reason):
             switch reason {
             case .battery:
-                return "当前电量已达到安全阈值，LidGo 保持关闭"
+                return "Battery has reached the safety cutoff; LidGo stays off"
             case .batteryUnavailable:
-                return "无法读取电池状态，LidGo 按安全策略保持关闭"
+                return "Battery status is unavailable; LidGo stays off as a safety precaution"
             case .thermal:
-                return "当前温度压力过高，LidGo 保持关闭"
+                return "Thermal pressure is too high; LidGo stays off"
             }
         }
     }
@@ -105,7 +105,7 @@ private func refresh(
         _ = coordinator.reconcile(now: now, inspect: inspector.snapshot(pid:))
         if !coordinator.state.holds.isEmpty {
             state = coordinator.state
-            return .text("无法刷新：当前存在 Hold 状态\n请先结束对应的 Hold 会话")
+            return .text("Cannot refresh: a Hold is active\nEnd the Hold session first")
         }
         if let reason = SafetyPolicy.stopReason(snapshot: safety, config: config) {
             _ = coordinator.tripSafety(reason: reason, now: now)
@@ -124,7 +124,7 @@ private func refresh(
         case let .refreshed(timer):
             return .text(StatusFormatter.timerRefreshed(timer, now: now))
         case .rejectedBecauseHold:
-            return .text("无法刷新：当前存在 Hold 状态\n请先结束对应的 Hold 会话")
+            return .text("Cannot refresh: a Hold is active\nEnd the Hold session first")
         }
     }
 }
@@ -155,7 +155,7 @@ private func forceToggle(
         case let .turnedOn(timer):
             return .text(StatusFormatter.timerCreated(timer, now: now))
         case .turnedOff:
-            return .text("LidGo 已强制关闭\n已恢复正常睡眠")
+            return .text("LidGo force-disabled\nNormal sleep restored")
         }
     }
 }
@@ -189,8 +189,8 @@ private func run() throws -> Int32 {
         return 0
     }
     if command == .switchNeedsForce {
-        print("switch 会强制改变当前全局状态")
-        print("请使用 lidgo switch -f 确认")
+        print("switch force-changes the current global state")
+        print("Run lidgo switch -f to confirm")
         return 1
     }
 
@@ -216,7 +216,7 @@ private func run() throws -> Int32 {
         return 0
     case .setup:
         try manager.setup()
-        print("MacLidAwake setup 已完成并通过自检")
+        print("MacLidAwake setup completed and passed self-checks")
         return 0
     case .rootSetup:
         try manager.rootSetup()

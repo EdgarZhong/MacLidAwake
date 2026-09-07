@@ -92,7 +92,7 @@ public final class AgentRuntime: @unchecked Sendable {
     public func run() -> Never {
         guard installShutdownHandling() else {
             try? powerController.setAwake(false)
-            FileHandle.standardError.write(Data("lidgo agent: 无法安装退出信号处理\n".utf8))
+            FileHandle.standardError.write(Data("lidgo agent: cannot install shutdown signal handling\n".utf8))
             exit(1)
         }
         performTick()
